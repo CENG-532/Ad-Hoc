@@ -44,10 +44,10 @@ def calculate_distance(position):
     return sqrt(pow(position[0] - position_self[0], 2) + pow(position[1] - position_self[1], 2))
 
 
-def is_in_range(message):
+def is_in_range(position):
     # here we need to set our distance to something, and compare it with the received message.
     # omit the message if it is not in our range.
-    return calculate_distance(message.position) <= communication_range
+    return calculate_distance(position) <= communication_range
 
 
 def worker_listener(context):
@@ -55,20 +55,19 @@ def worker_listener(context):
     client_socket.connect(network_layer_down_stream_address)
 
     while True:
-        message = server_message_queue.get()
-        message = pickle.loads(message)
+        message_raw = server_message_queue.get()
+        message = pickle.loads(message_raw)
 
-        if is_in_range(message.Position):
-            client_socket.send(message)
+        if is_in_range(message.position):
+            client_socket.send(message_raw)
 
 
-def network_layer_listener(context):
+def network_layer_listener():
     server_socket = context.socket(zmq.REP)
     server_socket.bind(link_layer_up_stream_address)
     udp_client = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
 
     while True:
-        # to send a message, you need to receive a structure from network layer
         message_raw = server_socket.recv()
         message = pickle.loads(message_raw)
         # depending on the message command, which can be decided after a discussion, we can define set of commands.
@@ -77,11 +76,11 @@ def network_layer_listener(context):
         udp_client.send(ip, message_raw)
 
 
-def link_layer_listener(context, address):
+def link_layer_listener():
     server_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     server_socket.setblocking(0)
     server_socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-    server_socket.bind(address)
+    server_socket.bind(ip_address_self)
 
     worker_thread = threading.Thread(target=worker_listener, args=(context,))
     worker_thread.start()
@@ -101,8 +100,8 @@ def read_config_file(filename, name):
     config.read(filename)
     node_settings = config[name]
     ip_address_self = node_settings["ip"]
-    position_self = (node_settings["positionX"], node_settings["positionX"])
-    communication_range = config["DEFAULT"]["range"]
+    position_self = (float(node_settings["positionX"]), float(node_settings["positionX"]))
+    communication_range = float(config["DEFAULT"]["range"])
 
 
 if __name__ == "__main__":
@@ -110,9 +109,19 @@ if __name__ == "__main__":
         print("Arguments are not valid. Usage: [name of the node]")
         exit(-1)
 
+    context = zmq.Context()
+
     read_config_file("config.ini", sys.argv[1])
 
     ip_address_self = sys.argv[1]
+    link_layer_server_thread = threading.Thread(target=link_layer_listener, args=())
+    network_layer_listener_thread = threading.Thread(target=network_layer_listener, args=())
+
+    link_layer_server_thread.start()
+    network_layer_listener_thread.start()
+
+    link_layer_server_thread.join()
+    network_layer_listener_thread.join()
 
 # context = zmq.Context()
 #

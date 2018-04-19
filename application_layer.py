@@ -19,7 +19,8 @@ if __name__ == "__main__":
     context = zmq.Context()
     server_socket = context.socket(zmq.REP)
     server_socket.bind("tcp://*:5555")
-    send_thread = threading.Thread(target=get_message_to_send, args=[context])
+    send_thread = threading.Thread(target=get_message_to_send, args=(context,))
+    send_thread.start()
 
     while True:
         received_message = server_socket.recv()

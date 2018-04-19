@@ -118,7 +118,7 @@ if __name__ == "__main__":
         print("Arguments are not valid. Usage: [name of the node]")
         exit(-1)
 
-    read_config_file("config.ini", sys.argv[1])
+    read_config_file("config.ini.ini", sys.argv[1])
     context = zmq.Context()
 
     network_layer_up_thread = threading.Thread(target=app_layer_listener, args=())
