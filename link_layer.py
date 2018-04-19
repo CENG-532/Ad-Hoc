@@ -1,5 +1,6 @@
 import zmq
 import time
+import sys
 import socket
 import threading
 import pickle
@@ -11,7 +12,7 @@ from collections import namedtuple
 
 # have MAC layout to match ip to mac or use IP right away.
 
-server_message_queue = queue.Queue()
+server_message_queue = queue.Queue()  # queue holds raw values of messages in byte format.
 
 position_self = (3, 4)  # some position
 
@@ -20,6 +21,10 @@ communication_range = 10
 node_id = 10
 
 packet = namedtuple("packet", ["type", "source", "destination", "next_hop", "position", "message"])
+
+network_layer_down_stream_address = "tcp://network_layer:5556"
+
+link_layer_up_stream_address = "tcp://link_layer:5554"
 
 
 def get_ip(message):
@@ -44,27 +49,29 @@ def is_in_range(message):
 
 def worker_listener(context):
     client_socket = context.socket(zmq.REQ)
+    client_socket.connect(network_layer_down_stream_address)
 
     while True:
         message = server_message_queue.get()
         message = pickle.loads(message)
 
         if is_in_range(message.Position):
-            client_socket.send("tcp://network_layer:5556", message)
+            client_socket.send(message)
 
 
-def network_layer_listener(context, address):
+def network_layer_listener(context):
     server_socket = context.socket(zmq.REP)
-    server_socket.bind(address)
+    server_socket.bind(link_layer_up_stream_address)
     udp_client = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
 
     while True:
         # to send a message, you need to receive a structure from network layer
-        message = server_socket.recv()
+        message_raw = server_socket.recv()
+        message = pickle.loads(message_raw)
         # depending on the message command, which can be decided after a discussion, we can define set of commands.
         ip = get_ip(message)
 
-        udp_client.send(ip, message)
+        udp_client.send(ip, message_raw)
 
 
 def link_layer_listener(context, address):
@@ -73,15 +80,24 @@ def link_layer_listener(context, address):
     server_socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
     server_socket.bind(address)
 
-    thread = threading.Thread(target=worker_listener, args=(context,))
-    thread.start()
+    worker_thread = threading.Thread(target=worker_listener, args=(context,))
+    worker_thread.start()
 
     while True:
         message = server_socket.recv(1024)
 
         server_message_queue.put(message)
 
-    thread.join()
+    worker_thread.join()
+
+
+if __name__ == "__main__":
+    if len(sys.argv) != 2:
+        print("Arguments are not valid. Usage: Pos.x Pos.y")
+        exit(-1)
+
+    position_self = (sys.argv[1], sys.argv[2])
+
 
 # context = zmq.Context()
 #
