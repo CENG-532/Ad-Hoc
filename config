@@ -1,0 +1,7 @@
+[DEFAULT]
+range = 10
+
+[NODE1]
+
+positionX = 5
+positionY = 5

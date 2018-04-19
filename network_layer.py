@@ -3,6 +3,7 @@ import threading
 import queue  # I am not sure if we need a queue or not.
 import pickle
 import sys
+import configparser
 
 from collections import namedtuple
 
@@ -13,8 +14,6 @@ routing_table_mutex = threading.Lock()
 
 routing_table = {}
 
-position_self = None  # some position
-
 link_layer_message_queue = queue.Queue()  # queue holds messages in original format.
 
 link_layer_address = "tcp://link_layer:5554"
@@ -24,6 +23,8 @@ network_layer_up_stream_address = "tcp://network_layer:5555"
 network_layer_down_stream_address = "tcp://network_layer:5556"
 
 app_layer_address = "tcp://app_layer:5557"
+
+ip_address_self = ""
 
 
 # here define rooting algorithm
@@ -58,7 +59,7 @@ def _is_control_message(message_type):
 
 
 def _is_destination_self(destination):
-    return destination[0] == position_self[0] and destination[1] == position_self[1]
+    return destination == ip_address_self
 
 
 def link_layer_listener():
@@ -103,12 +104,21 @@ def link_layer_client():
     pass
 
 
+def read_config_file(filename, name):
+    global ip_address_self
+
+    config = configparser.ConfigParser()
+    config.read(filename)
+    default_settings = config[name]
+    ip_address_self = default_settings["ip"]
+
+
 if __name__ == "__main__":
     if len(sys.argv) != 2:
-        print("Arguments are not valid. Usage: Pos.x Pos.y")
+        print("Arguments are not valid. Usage: [name of the node]")
         exit(-1)
 
-    position_self = (sys.argv[1], sys.argv[2])
+    read_config_file("config.ini", sys.argv[1])
     context = zmq.Context()
 
     network_layer_up_thread = threading.Thread(target=app_layer_listener, args=())

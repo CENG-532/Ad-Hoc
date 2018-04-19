@@ -5,6 +5,7 @@ import socket
 import threading
 import pickle
 import queue
+import configparser
 
 from math import sqrt, pow
 from collections import namedtuple
@@ -25,6 +26,8 @@ packet = namedtuple("packet", ["type", "source", "destination", "next_hop", "pos
 network_layer_down_stream_address = "tcp://network_layer:5556"
 
 link_layer_up_stream_address = "tcp://link_layer:5554"
+
+ip_address_self = ""
 
 
 def get_ip(message):
@@ -91,13 +94,25 @@ def link_layer_listener(context, address):
     worker_thread.join()
 
 
+def read_config_file(filename, name):
+    global ip_address_self, communication_range, position_self
+
+    config = configparser.ConfigParser()
+    config.read(filename)
+    node_settings = config[name]
+    ip_address_self = node_settings["ip"]
+    position_self = (node_settings["positionX"], node_settings["positionX"])
+    communication_range = config["DEFAULT"]["range"]
+
+
 if __name__ == "__main__":
     if len(sys.argv) != 2:
-        print("Arguments are not valid. Usage: Pos.x Pos.y")
+        print("Arguments are not valid. Usage: [name of the node]")
         exit(-1)
 
-    position_self = (sys.argv[1], sys.argv[2])
+    read_config_file("config.ini", sys.argv[1])
 
+    ip_address_self = sys.argv[1]
 
 # context = zmq.Context()
 #
