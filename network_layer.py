@@ -12,7 +12,13 @@ packet = namedtuple("packet", ["type", "source", "destination", "next_hop", "pos
 routing_table_mutex = threading.Lock()
 # this is a dictionary that we can keep names to corresponding IPs, also necessary routing information.
 
-routing_table = {}
+neighbor_list = []  # nodes that are adjacent to the current node.
+
+topology_table = {}  # will consist of link state information of node j and the timestamp of that information
+
+next_hop_table = {}
+
+distance_table = {}
 
 link_layer_message_queue = queue.Queue()  # queue holds messages in original format.
 
@@ -40,7 +46,7 @@ def find_routing(destination):
     # check routing table to find the next hop.
     routing_table_mutex.acquire()
     try:
-        next_hop = routing_table[destination]
+        next_hop = next_hop_table[destination]
     except KeyError:
         next_hop = "something"
     routing_table_mutex.release()
@@ -55,7 +61,7 @@ def update_routing_table(message):
     # here we need to to update routing table based on the algorithm we use.
     routing_table_mutex.acquire()
     pass
-    routing_table_mutex.relase()
+    routing_table_mutex.release()
 
 
 def _is_control_message(message_type):
