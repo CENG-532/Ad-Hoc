@@ -32,8 +32,9 @@ ip_address_self = "127.0.0.1:5554"
 
 def get_ip(message):
     # we need both port numbers and IP addresses of destination.
-    return message.next_hop
-
+    # return message.next_hop
+    # test:
+    return "127.0.0.1", 5900
 
 def update_mac_table(message):
     # here we might want to update mac table if we decide to use different convention than IP addressing.
@@ -52,7 +53,7 @@ def is_in_range(position):
 
 def worker_listener(context):
     print("worker thread is started.")
-    client_socket = context.socket(zmq.REQ)
+    client_socket = context.socket(zmq.PUSH)
     client_socket.connect(network_layer_down_stream_address)
 
     while True:
@@ -65,7 +66,7 @@ def worker_listener(context):
 
 def network_layer_listener():
     print("network layer listener is started")
-    server_socket = context.socket(zmq.REP)
+    server_socket = context.socket(zmq.PULL)
     server_socket.bind(link_layer_up_stream_address)
     server_socket.setsockopt(zmq.LINGER, 0)
 
@@ -77,7 +78,7 @@ def network_layer_listener():
         # depending on the message command, which can be decided after a discussion, we can define set of commands.
         ip = get_ip(message)
         print(message)
-        udp_client.send(ip, message_raw)
+        udp_client.sendto(message_raw, ip)
 
 
 def link_layer_listener():

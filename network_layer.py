@@ -67,11 +67,11 @@ def _is_destination_self(destination):
 
 
 def link_layer_listener():
-    server_socket = context.socket(zmq.REP)
+    server_socket = context.socket(zmq.PULL)
     server_socket.bind(network_layer_down_stream_address)
     server_socket.setsockopt(zmq.LINGER, 0)
 
-    client_socket = context.socket(zmq.REQ)
+    client_socket = context.socket(zmq.PUSH)
     client_socket.connect(app_layer_address)
 
     while True:
@@ -88,7 +88,7 @@ def link_layer_listener():
 
 def app_layer_listener():
     # if the message contains control type flag, we should update the routing table we have.
-    server_socket = context.socket(zmq.REP)
+    server_socket = context.socket(zmq.PULL)
     server_socket.bind(network_layer_up_stream_address)
     server_socket.setsockopt(zmq.LINGER, 0)
 
@@ -98,7 +98,7 @@ def app_layer_listener():
 
 
 def link_layer_client():
-    client_socket = context.socket(zmq.REQ)
+    client_socket = context.socket(zmq.PUSH)
     client_socket.connect(link_layer_address)
     while True:
         message = link_layer_message_queue.get()

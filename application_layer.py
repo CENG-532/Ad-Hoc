@@ -10,7 +10,7 @@ network_layer_up_stream = "tcp://127.0.0.1:5555"  # network layer up stream
 
 
 def get_message_to_send(context):
-    client_socket = context.socket(zmq.REQ)
+    client_socket = context.socket(zmq.PUSH)
     client_socket.connect(network_layer_up_stream)
     # get a message from user and send it
     while True:
@@ -23,7 +23,7 @@ def get_message_to_send(context):
 
 if __name__ == "__main__":
     context = zmq.Context()
-    server_socket = context.socket(zmq.REP)
+    server_socket = context.socket(zmq.PULL)
     server_socket.bind(application_layer_address)
     server_socket.setsockopt(zmq.LINGER, 0)
 
