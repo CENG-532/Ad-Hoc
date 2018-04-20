@@ -37,8 +37,23 @@ ip_address_self = ""
 
 # here we need atomic data structure for rooting algorithm
 
+def node_init():
+    pass
 
-def periodic_update_location():
+
+def find_shortest_path():
+    pass
+
+
+def process_packet():
+    pass
+
+
+def check_neighbors():
+    pass
+
+
+def periodic_routing_update():
     pass
 
 
