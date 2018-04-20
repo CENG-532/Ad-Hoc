@@ -16,13 +16,13 @@ routing_table = {}
 
 link_layer_message_queue = queue.Queue()  # queue holds messages in original format.
 
-link_layer_address = "tcp://link_layer:5554"
+link_layer_address = "tcp://127.0.0.1:5554"  # link layer address
 
-network_layer_up_stream_address = "tcp://network_layer:5555"
+network_layer_up_stream_address = "tcp://127.0.0.1:5555"  # network layer up stream
 
-network_layer_down_stream_address = "tcp://network_layer:5556"
+network_layer_down_stream_address = "tcp://127.0.0.1:5556"  # network layer down stream
 
-app_layer_address = "tcp://app_layer:5557"
+app_layer_address = "tcp://127.0.0.1:5557"  # application layer
 
 ip_address_self = ""
 
@@ -38,9 +38,13 @@ def periodic_update_location():
 
 def find_routing(destination):
     # check routing table to find the next hop.
-    with routing_table_mutex:
+    routing_table_mutex.acquire()
+    try:
         next_hop = routing_table[destination]
-        return next_hop
+    except KeyError:
+        next_hop = "something"
+    routing_table_mutex.release()
+    return next_hop
 
 
 def query_address():
@@ -49,9 +53,9 @@ def query_address():
 
 def update_routing_table(message):
     # here we need to to update routing table based on the algorithm we use.
-    with routing_table_mutex:
-        pass
+    routing_table_mutex.acquire()
     pass
+    routing_table_mutex.relase()
 
 
 def _is_control_message(message_type):
@@ -65,6 +69,7 @@ def _is_destination_self(destination):
 def link_layer_listener():
     server_socket = context.socket(zmq.REP)
     server_socket.bind(network_layer_down_stream_address)
+    server_socket.setsockopt(zmq.LINGER, 0)
 
     client_socket = context.socket(zmq.REQ)
     client_socket.connect(app_layer_address)
@@ -85,6 +90,7 @@ def app_layer_listener():
     # if the message contains control type flag, we should update the routing table we have.
     server_socket = context.socket(zmq.REP)
     server_socket.bind(network_layer_up_stream_address)
+    server_socket.setsockopt(zmq.LINGER, 0)
 
     while True:
         message = server_socket.recv()
@@ -97,7 +103,7 @@ def link_layer_client():
     while True:
         message = link_layer_message_queue.get()
 
-        message.destination = find_routing(message.destination)
+        message._replace(next_hop=find_routing(message.destination))
 
         client_socket.send(pickle.dumps(message))
 
@@ -109,8 +115,11 @@ def read_config_file(filename, name):
 
     config = configparser.ConfigParser()
     config.read(filename)
-    default_settings = config[name]
-    ip_address_self = default_settings["ip"]
+    default_settings = config["DEFAULT"]
+    node_settings = config[name]
+    ip_address_self = node_settings["ip"]
+    port_read = ip_address_self.split(":")
+    ip_address_self = (port_read[0], int(port_read[1][:-1]))
 
 
 if __name__ == "__main__":
@@ -118,7 +127,7 @@ if __name__ == "__main__":
         print("Arguments are not valid. Usage: [name of the node]")
         exit(-1)
 
-    read_config_file("config.ini.ini", sys.argv[1])
+    read_config_file("config.ini", sys.argv[1])
     context = zmq.Context()
 
     network_layer_up_thread = threading.Thread(target=app_layer_listener, args=())

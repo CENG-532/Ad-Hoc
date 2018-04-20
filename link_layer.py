@@ -23,11 +23,11 @@ node_id = 10
 
 packet = namedtuple("packet", ["type", "source", "destination", "next_hop", "position", "message"])
 
-network_layer_down_stream_address = "tcp://network_layer:5556"
+network_layer_down_stream_address = "tcp://127.0.0.1:5556"  # network layer down stream
 
-link_layer_up_stream_address = "tcp://link_layer:5554"
+link_layer_up_stream_address = "tcp://127.0.0.1:5554"  # link layer up stream
 
-ip_address_self = ""
+ip_address_self = "127.0.0.1:5554"
 
 
 def get_ip(message):
@@ -51,6 +51,7 @@ def is_in_range(position):
 
 
 def worker_listener(context):
+    print("worker thread is started.")
     client_socket = context.socket(zmq.REQ)
     client_socket.connect(network_layer_down_stream_address)
 
@@ -63,8 +64,11 @@ def worker_listener(context):
 
 
 def network_layer_listener():
+    print("network layer listener is started")
     server_socket = context.socket(zmq.REP)
     server_socket.bind(link_layer_up_stream_address)
+    server_socket.setsockopt(zmq.LINGER, 0)
+
     udp_client = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
 
     while True:
@@ -72,13 +76,12 @@ def network_layer_listener():
         message = pickle.loads(message_raw)
         # depending on the message command, which can be decided after a discussion, we can define set of commands.
         ip = get_ip(message)
-
+        print(message)
         udp_client.send(ip, message_raw)
 
 
 def link_layer_listener():
     server_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-    server_socket.setblocking(0)
     server_socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
     server_socket.bind(ip_address_self)
 
@@ -100,6 +103,11 @@ def read_config_file(filename, name):
     config.read(filename)
     node_settings = config[name]
     ip_address_self = node_settings["ip"]
+    port_read = ip_address_self.split(":")
+    ip_address_self = (port_read[0][1:], int(port_read[1][:-1]))
+
+    print(ip_address_self)
+
     position_self = (float(node_settings["positionX"]), float(node_settings["positionX"]))
     communication_range = float(config["DEFAULT"]["range"])
 
@@ -113,7 +121,6 @@ if __name__ == "__main__":
 
     read_config_file("config.ini", sys.argv[1])
 
-    ip_address_self = sys.argv[1]
     link_layer_server_thread = threading.Thread(target=link_layer_listener, args=())
     network_layer_listener_thread = threading.Thread(target=network_layer_listener, args=())
 
