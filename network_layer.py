@@ -4,15 +4,19 @@ import queue  # I am not sure if we need a queue or not.
 import pickle
 import sys
 import configparser
+import math
+
 
 from collections import namedtuple
 
-packet = namedtuple("packet", ["type", "source", "name", "sequence", "link state", "destination", "next_hop", "position", "message"])
+packet = namedtuple("packet",
+                    ["type", "source", "name", "sequence", "link state", "destination", "next_hop", "position",
+                     "message"])
 
 routing_table_mutex = threading.Lock()
 # this is a dictionary that we can keep names to corresponding IPs, also necessary routing information.
 
-neighbor_list = []  # nodes that are adjacent to the current node.
+neighbor_list = {}  # nodes that are adjacent to the current node. (name, pos)
 
 topology_table = {"link state": {}, "sequence": {}}  # will consist of link state information of node j and the sequence
 
@@ -21,6 +25,8 @@ next_hop_table = {}
 distance_table = {}
 
 sequence = 0
+
+known_nodes = []
 
 link_layer_message_queue = queue.Queue()  # queue holds messages in original format.
 
@@ -36,7 +42,7 @@ ip_address_self = ""
 
 name_self = ""
 
-known_nodes = []  # has names of the known nodes.
+position_self = (3, 4)  # some position
 
 
 # here define rooting algorithm
@@ -47,8 +53,36 @@ def node_init():
     pass
 
 
+def calculate_distance(pos1, pos2):
+    return math.sqrt(math.pow(pos1[0] - pos2[0], 2) + math.pow(pos1[1] - pos2[1], 2))
+
+
 def find_shortest_path():
-    pass
+    # dijkstra shortest-path algorithm
+    p = [name_self]
+    distance_table[name_self] = 0
+    for x, pos_x in known_nodes:
+        if x is not name_self:
+            if x in topology_table["link state"][name_self]:
+                distance_table[x] = calculate_distance(position_self, pos_x)
+                next_hop_table[x] = x  # paper says k instead of x
+            else:
+                distance_table[x] = math.inf
+                next_hop_table[x] = -1  # paper says k instead of x
+
+    while list(set(known_nodes) - set(p)):
+        min_k, min_l, min_pos_k, min_pos_l = "", "", 0, 0  # most probably redundant
+        min_distance = math.inf
+        for k, pos_k in list(set(known_nodes) - set(p)):
+            for l, pos_l in p:
+                distance = calculate_distance(pos_l, pos_k) + distance_table[l]
+                if distance < min_distance:
+                    min_distance = distance
+                    min_k, min_pos_k, min_l, min_pos_l = k, pos_k, l, pos_l
+        if min_k:  # most probably redundant
+            p.append((min_k, min_pos_k))
+            distance_table[min_k] = distance_table[min_l] + min_distance
+            next_hop_table[min_k] = next_hop_table[min_l]
 
 
 def process_packet(message):
@@ -77,7 +111,7 @@ def check_neighbors():
             continue
 
     for neighbor in to_be_deleted_neighbors:
-        neighbor_list.remove(neighbor)
+        neighbor_list.pop(neighbor)
 
 
 def periodic_routing_update():
