@@ -7,18 +7,20 @@ import configparser
 
 from collections import namedtuple
 
-packet = namedtuple("packet", ["type", "source", "destination", "next_hop", "position", "message"])
+packet = namedtuple("packet", ["type", "source", "name", "sequence", "link state", "destination", "next_hop", "position", "message"])
 
 routing_table_mutex = threading.Lock()
 # this is a dictionary that we can keep names to corresponding IPs, also necessary routing information.
 
 neighbor_list = []  # nodes that are adjacent to the current node.
 
-topology_table = {}  # will consist of link state information of node j and the timestamp of that information
+topology_table = {"link state": {}, "sequence": {}}  # will consist of link state information of node j and the sequence
 
 next_hop_table = {}
 
 distance_table = {}
+
+sequence = 0
 
 link_layer_message_queue = queue.Queue()  # queue holds messages in original format.
 
@@ -31,6 +33,10 @@ network_layer_down_stream_address = "tcp://127.0.0.1:5556"  # network layer down
 app_layer_address = "tcp://127.0.0.1:5557"  # application layer
 
 ip_address_self = ""
+
+name_self = ""
+
+known_nodes = []  # has names of the known nodes.
 
 
 # here define rooting algorithm
@@ -45,15 +51,39 @@ def find_shortest_path():
     pass
 
 
-def process_packet():
-    pass
+def process_packet(message):
+    source = message.source
+    name = message.name
+    packet_sequence = int(message.sequence)
+    packet_link_state = message.link_state
+    try:
+        topology_table["link state"][name] = topology_table["link state"][name] + source
+    except KeyError:
+        topology_table["link state"][name] = [source]  # currently under development
+
+    for node_name in known_nodes:
+        if node_name != name_self and packet_sequence > topology_table["sequence"][node_name]:
+            topology_table["sequence"][node_name] = packet_sequence
+            topology_table["link state"][node_name] = packet_link_state
 
 
 def check_neighbors():
-    pass
+    to_be_deleted_neighbors = []
+    for neighbor in neighbor_list:
+        try:
+            if distance_table[neighbor] == sys.maxsize:
+                to_be_deleted_neighbors.append(neighbor)
+        except KeyError:
+            continue
+
+    for neighbor in to_be_deleted_neighbors:
+        neighbor_list.remove(neighbor)
 
 
 def periodic_routing_update():
+    global sequence
+    sequence += 1
+
     pass
 
 
@@ -132,8 +162,9 @@ def link_layer_client():
 
 
 def read_config_file(filename, name):
-    global ip_address_self
+    global ip_address_self, name_self
 
+    name_self = name
     config = configparser.ConfigParser()
     config.read(filename)
     default_settings = config["DEFAULT"]
