@@ -13,6 +13,7 @@ def get_message_to_send(context):
     client_socket = context.socket(zmq.PUSH)
     client_socket.connect(network_layer_up_stream)
     # get a message from user and send it
+    # commit
     while True:
         message = input("message: ")
         destination = input("destination: ")
