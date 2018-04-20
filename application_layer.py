@@ -3,6 +3,7 @@ from collections import namedtuple
 import threading
 
 packet = namedtuple("packet", ["type", "source", "destination", "next_hop", "position", "message"])
+application_layer_address = "tcp://app_layer:5557"
 
 
 def get_message_to_send(context):
@@ -18,7 +19,7 @@ def get_message_to_send(context):
 if __name__ == "__main__":
     context = zmq.Context()
     server_socket = context.socket(zmq.REP)
-    server_socket.bind("tcp://*:5555")
+    server_socket.bind(application_layer_address)
     send_thread = threading.Thread(target=get_message_to_send, args=(context,))
     send_thread.start()
 
