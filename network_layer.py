@@ -5,6 +5,7 @@ import pickle
 import sys
 import configparser
 import math
+import time
 
 
 from collections import namedtuple
@@ -16,7 +17,7 @@ packet = namedtuple("packet",
 routing_table_mutex = threading.Lock()
 # this is a dictionary that we can keep names to corresponding IPs, also necessary routing information.
 
-neighbor_list = {}  # nodes that are adjacent to the current node. (name, pos)
+neighbor_list = []  # nodes that are adjacent to the current node. (name, pos)
 
 topology_table = {"link state": {}, "sequence": {}}  # will consist of link state information of node j and the sequence
 
@@ -25,6 +26,12 @@ next_hop_table = {}
 distance_table = {}
 
 sequence = 0
+
+clock_interval_by_hops = []
+
+fish_eye_ranges = []
+
+number_of_scope = 2
 
 known_nodes = []
 
@@ -40,9 +47,11 @@ app_layer_address = "tcp://127.0.0.1:5557"  # application layer
 
 ip_address_self = ""
 
+port_number_self = None
+
 name_self = ""
 
-position_self = (3, 4)  # some position
+position_self = None
 
 
 # here define rooting algorithm
@@ -111,14 +120,29 @@ def check_neighbors():
             continue
 
     for neighbor in to_be_deleted_neighbors:
-        neighbor_list.pop(neighbor)
+        neighbor_list.remove(neighbor)
 
 
 def periodic_routing_update():
     global sequence
     sequence += 1
 
-    pass
+    # I have added necessary parts roughly. We can check both the packet type and structural design tomorrow.
+
+    topology_table["link state"][name_self] = []
+    topology_table["sequence"][name_self] = sequence
+
+    message = packet("Pupdate", ip_address_self, name_self, sequence, "link state here", "255.255.255.255", "", position_self, "")
+
+    for node in neighbor_list:
+        topology_table["link state"][name_self].append(node)
+
+    for node , _ in known_nodes:
+        for scope in range(number_of_scope):
+            clock = clock_interval_by_hops[scope]
+            fish_eye_range = fish_eye_ranges[scope]
+            if distance_table[node] < fish_eye_range and clock % 1000:
+                message._replace(topology_table=message.topology_table + topology_table["link state"][node])
 
 
 def find_routing(destination):
@@ -141,6 +165,13 @@ def update_routing_table(message):
     routing_table_mutex.acquire()
     pass
     routing_table_mutex.release()
+
+    process_packet(message)
+    # here reset the topology table I guess,
+    # we need to check the structure here as well.
+    topology_table["link state"][name_self] = neighbor_list
+    find_shortest_path()
+    periodic_routing_update()
 
 
 def _is_control_message(message_type):
@@ -196,7 +227,8 @@ def link_layer_client():
 
 
 def read_config_file(filename, name):
-    global ip_address_self, name_self
+    global ip_address_self, name_self, position_self, clock_interval_by_hops
+    global number_of_scope, port_number_self
 
     name_self = name
     config = configparser.ConfigParser()
@@ -205,7 +237,18 @@ def read_config_file(filename, name):
     node_settings = config[name]
     ip_address_self = node_settings["ip"]
     port_read = ip_address_self.split(":")
-    ip_address_self = (port_read[0], int(port_read[1][:-1]))
+    port_number_self = int(port_read[1][:-1])
+    ip_address_self = (port_read[0], port_number_self)
+
+    clock_interval_by_hops.append(int(default_settings["clock_interval_hop_1"]))
+    clock_interval_by_hops.append(int(default_settings["clock_interval_hop_2"]))
+
+    fish_eye_ranges.append(int(default_settings["fish_eye_range_1"]))
+    fish_eye_ranges.append(int(default_settings["fish_eye_range_2"]))
+
+    number_of_scope = len(fish_eye_ranges)
+
+    position_self = (float(node_settings["positionX"]), float(node_settings["positionX"]))
 
 
 if __name__ == "__main__":

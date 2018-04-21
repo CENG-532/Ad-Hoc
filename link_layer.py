@@ -10,7 +10,6 @@ import configparser
 from math import sqrt, pow
 from collections import namedtuple
 
-
 # have MAC layout to match ip to mac or use IP right away.
 
 server_message_queue = queue.Queue()  # queue holds raw values of messages in byte format.
@@ -35,6 +34,7 @@ def get_ip(message):
     # return message.next_hop
     # test:
     return "127.0.0.1", 5900
+
 
 def update_mac_table(message):
     # here we might want to update mac table if we decide to use different convention than IP addressing.
@@ -77,6 +77,7 @@ def network_layer_listener():
         message = pickle.loads(message_raw)
         # depending on the message command, which can be decided after a discussion, we can define set of commands.
         ip = get_ip(message)
+        # since we only care about ip address of the message to be sent, there is no need to check for extra stuff here.
         print(message)
         udp_client.sendto(message_raw, ip)
 
