@@ -7,11 +7,10 @@ import configparser
 import math
 import time
 
-
 from collections import namedtuple
 
 packet = namedtuple("packet",
-                    ["type", "source", "name", "sequence", "link state", "destination", "next_hop", "position",
+                    ["type", "source", "name", "sequence", "link state", "destinationName", "destinationIP", "next_hop", "position",
                      "message"])
 
 routing_table_mutex = threading.Lock()
@@ -53,13 +52,18 @@ name_self = ""
 
 position_self = None
 
+link_layer_port_number = None
+
 
 # here define rooting algorithm
 
 # here we need atomic data structure for rooting algorithm
 
 def node_init():
-    pass
+    # the initialization message that all nodes are going to send to each other.
+    message = packet("Pbroad", ip_address_self, name_self, sequence, "", ("255.255.255.255", link_layer_port_number),
+                     "", position_self, "")
+    link_layer_message_queue.put(message)
 
 
 def calculate_distance(pos1, pos2):
@@ -67,6 +71,7 @@ def calculate_distance(pos1, pos2):
 
 
 def find_shortest_path():
+    global position_self
     # dijkstra shortest-path algorithm
     p = [name_self]
     distance_table[name_self] = 0
@@ -132,12 +137,13 @@ def periodic_routing_update():
     topology_table["link state"][name_self] = []
     topology_table["sequence"][name_self] = sequence
 
-    message = packet("Pupdate", ip_address_self, name_self, sequence, "link state here", "255.255.255.255", "", position_self, "")
+    message = packet("Pupdate", ip_address_self, name_self, sequence, "link state here", "255.255.255.255", "",
+                     position_self, "")
 
     for node in neighbor_list:
         topology_table["link state"][name_self].append(node)
 
-    for node , _ in known_nodes:
+    for node, _ in known_nodes:
         for scope in range(number_of_scope):
             clock = clock_interval_by_hops[scope]
             fish_eye_range = fish_eye_ranges[scope]
@@ -151,7 +157,7 @@ def find_routing(destination):
     try:
         next_hop = next_hop_table[destination]
     except KeyError:
-        next_hop = "something"
+        next_hop = ""
     routing_table_mutex.release()
     return next_hop
 
@@ -208,6 +214,8 @@ def app_layer_listener():
     server_socket.bind(network_layer_up_stream_address)
     server_socket.setsockopt(zmq.LINGER, 0)
 
+    node_init()
+
     while True:
         message = server_socket.recv()
         link_layer_message_queue.put(pickle.loads(message))
@@ -219,6 +227,8 @@ def link_layer_client():
     while True:
         message = link_layer_message_queue.get()
 
+        next_hop = find_routing(message.destination)
+
         message._replace(next_hop=find_routing(message.destination))
 
         client_socket.send(pickle.dumps(message))
@@ -228,7 +238,7 @@ def link_layer_client():
 
 def read_config_file(filename, name):
     global ip_address_self, name_self, position_self, clock_interval_by_hops
-    global number_of_scope, port_number_self
+    global number_of_scope, port_number_self, link_layer_port_number
 
     name_self = name
     config = configparser.ConfigParser()
@@ -239,6 +249,7 @@ def read_config_file(filename, name):
     port_read = ip_address_self.split(":")
     port_number_self = int(port_read[1][:-1])
     ip_address_self = (port_read[0], port_number_self)
+    link_layer_port_number = default_settings["link_layer_port_number"]
 
     clock_interval_by_hops.append(int(default_settings["clock_interval_hop_1"]))
     clock_interval_by_hops.append(int(default_settings["clock_interval_hop_2"]))
