@@ -26,14 +26,16 @@ network_layer_down_stream_address = "tcp://127.0.0.1:5556"  # network layer down
 
 link_layer_up_stream_address = "tcp://127.0.0.1:5554"  # link layer up stream
 
-ip_address_self = "127.0.0.1:5554"
+ip_address_self = "127.0.0.1"
+
+link_layer_port_number = None
 
 
 def get_ip(message):
     # we need both port numbers and IP addresses of destination.
     # return message.next_hop
     # test:
-    return "127.0.0.1", 5900
+    return message.next_hop if message.next_hop != "" else message.destination
 
 
 def update_mac_table(message):
@@ -99,14 +101,18 @@ def link_layer_listener():
 
 
 def read_config_file(filename, name):
-    global ip_address_self, communication_range, position_self
+    global ip_address_self, communication_range, position_self, link_layer_port_number
 
     config = configparser.ConfigParser()
     config.read(filename)
+
+    default_settings = config["DEFAULT"]
     node_settings = config[name]
+
     ip_address_self = node_settings["ip"]
-    port_read = ip_address_self.split(":")
-    ip_address_self = (port_read[0][1:], int(port_read[1][:-1]))
+    link_layer_port_number = int(default_settings["link_layer_port_number"])
+
+    ip_address_self = (ip_address_self, link_layer_port_number)
 
     print(ip_address_self)
 
@@ -132,19 +138,3 @@ if __name__ == "__main__":
     link_layer_server_thread.join()
     network_layer_listener_thread.join()
 
-# context = zmq.Context()
-#
-# socket = context.socket(zmq.REP)
-#
-# socket.bind("tcp://*:5555")
-#
-# while True:
-#     #  Wait for next request from client
-#     message = socket.recv()
-#     print("Received request: %s" % message)
-#
-#     #  Do some 'work'
-#     time.sleep(1)
-#
-#     #  Send reply back to client
-#     socket.send(b"World")
