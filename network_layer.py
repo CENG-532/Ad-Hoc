@@ -10,7 +10,8 @@ import time
 from collections import namedtuple
 
 packet = namedtuple("packet",
-                    ["type", "source", "name", "sequence", "link state", "destinationName", "destinationIP", "next_hop", "position",
+                    ["type", "source", "name", "sequence", "link state", "destination", "next_hop",
+                     "position",
                      "message"])
 
 routing_table_mutex = threading.Lock()
@@ -72,8 +73,12 @@ def calculate_distance(pos1, pos2):
 
 def find_shortest_path():
     global position_self
+    global next_hop_table
+    global distance_table
+
     # dijkstra shortest-path algorithm
-    p = [name_self]
+    next_hop_table = {"A": "A"}
+    p = [(name_self, position_self)]
     distance_table[name_self] = 0
     for x, pos_x in known_nodes:
         if x is not name_self:
@@ -84,18 +89,22 @@ def find_shortest_path():
                 distance_table[x] = math.inf
                 next_hop_table[x] = -1  # paper says k instead of x
 
+    print("next1", next_hop_table)
+    is_changed = False
     while list(set(known_nodes) - set(p)):
         min_k, min_l, min_pos_k, min_pos_l = "", "", 0, 0  # most probably redundant
-        min_distance = math.inf
         for k, pos_k in list(set(known_nodes) - set(p)):
+            min_distance = distance_table[k]
             for l, pos_l in p:
                 distance = calculate_distance(pos_l, pos_k) + distance_table[l]
-                if distance < min_distance:
+                if round(distance, 2) < round(min_distance, 2):
+                    is_changed = True
                     min_distance = distance
                     min_k, min_pos_k, min_l, min_pos_l = k, pos_k, l, pos_l
-        if min_k:  # most probably redundant
-            p.append((min_k, min_pos_k))
-            distance_table[min_k] = distance_table[min_l] + min_distance
+            p.append((k, pos_k))
+        if is_changed:
+            is_changed = False
+            distance_table[min_k] = min_distance
             next_hop_table[min_k] = next_hop_table[min_l]
 
 
