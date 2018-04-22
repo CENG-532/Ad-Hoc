@@ -21,9 +21,6 @@ neighbor_list = []  # nodes that are adjacent to the current node. (name, pos)
 
 topology_table = {"link state": {}, "sequence": {}}  # will consist of link state information of node j and the sequence
 
-next_hop_table = {}
-
-distance_table = {}
 
 sequence = 0
 
@@ -73,39 +70,42 @@ def calculate_distance(pos1, pos2):
 
 def find_shortest_path():
     global position_self
-    global next_hop_table
-    global distance_table
+    global routing_table
 
     # dijkstra shortest-path algorithm
-    next_hop_table = {"A": "A"}
+    routing_table[name_self] = {"dest_addr": ip_address_self, "next_hop": ip_address_self, "distance": 0}
     p = [(name_self, position_self)]
-    distance_table[name_self] = 0
-    for x, pos_x in known_nodes:
+    for x in known_nodes:
+        pos_x = topology_table[x]["position"]
         if x is not name_self:
-            if x in topology_table["link state"][name_self]:
-                distance_table[x] = calculate_distance(position_self, pos_x)
-                next_hop_table[x] = x  # paper says k instead of x
+            if x in topology_table[name_self]["neighbor_list"]:
+                routing_table[x]["distance"] = calculate_distance(position_self, pos_x)
+                routing_table[x]["next_hop"] = topology_table[x]["ip_address"]
             else:
-                distance_table[x] = math.inf
-                next_hop_table[x] = -1  # paper says k instead of x
+                routing_table[x]["distance"] = math.inf
+                routing_table[x]["next_hop"] = -1
 
-    print("next1", next_hop_table)
+
     is_changed = False
     while list(set(known_nodes) - set(p)):
-        min_k, min_l, min_pos_k, min_pos_l = "", "", 0, 0  # most probably redundant
-        for k, pos_k in list(set(known_nodes) - set(p)):
-            min_distance = distance_table[k]
-            for l, pos_l in p:
-                distance = calculate_distance(pos_l, pos_k) + distance_table[l]
+        min_k, min_l, min_pos_k, min_pos_l = "", "", 0, 0
+        for k in topology_table:
+            if k == name_self:
+                continue
+            pos_k = topology_table[k]["position"]
+            min_distance = routing_table[k]["distance"]
+            for l, pos_l in list(set(known_nodes) - set(p)):
+                pos_l = topology_table[l]["position"]
+                distance = calculate_distance(pos_l, pos_k) + routing_table[l]["distance"]
                 if round(distance, 2) < round(min_distance, 2):
                     is_changed = True
                     min_distance = distance
                     min_k, min_pos_k, min_l, min_pos_l = k, pos_k, l, pos_l
-            p.append((k, pos_k))
+            p.append(k)
         if is_changed:
             is_changed = False
-            distance_table[min_k] = min_distance
-            next_hop_table[min_k] = next_hop_table[min_l]
+            routing_table[min_k]["distance"] = min_distance
+            routing_table[min_k]["next_hop"] = routing_table[min_l]["next_hop"]
 
 
 def process_packet(message):
@@ -126,15 +126,15 @@ def process_packet(message):
 
 def check_neighbors():
     to_be_deleted_neighbors = []
-    for neighbor in neighbor_list:
+    for neighbor in topology_table[name_self]["neighbor_list"]:
         try:
-            if distance_table[neighbor] == sys.maxsize:
+            if routing_table[neighbor]["distance"] == sys.maxsize:
                 to_be_deleted_neighbors.append(neighbor)
         except KeyError:
             continue
 
     for neighbor in to_be_deleted_neighbors:
-        neighbor_list.remove(neighbor)
+        topology_table[name_self]["neighbor_list"].remove(neighbor)
 
 
 def periodic_routing_update():
@@ -164,7 +164,7 @@ def find_routing(destination):
     # check routing table to find the next hop.
     routing_table_mutex.acquire()
     try:
-        next_hop = next_hop_table[destination]
+        next_hop = topology_table[destination]["next_hop"]
     except KeyError:
         next_hop = ""
     routing_table_mutex.release()
