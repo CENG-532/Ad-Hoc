@@ -6,6 +6,7 @@ import threading
 import pickle
 import queue
 import configparser
+import signal
 
 from math import sqrt, pow
 from collections import namedtuple
@@ -20,7 +21,10 @@ communication_range = 10
 
 node_id = 10
 
-packet = namedtuple("packet", ["type", "source", "destination", "next_hop", "position", "message"])
+packet = namedtuple("packet",
+                    ["type", "source", "name", "sequence", "link_state", "destination", "next_hop",
+                     "position",
+                     "message"])
 
 network_layer_down_stream_address = "tcp://127.0.0.1:5556"  # network layer down stream
 
@@ -73,6 +77,7 @@ def network_layer_listener():
     server_socket.setsockopt(zmq.LINGER, 0)
 
     udp_client = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    udp_client.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
 
     while True:
         message_raw = server_socket.recv()
@@ -120,12 +125,21 @@ def read_config_file(filename, name):
     communication_range = float(config["DEFAULT"]["range"])
 
 
+def signal_handler(signal, frame):
+    context.term()
+    context.destroy()
+    print("you pressed on ctrl+c")
+    sys.exit()
+
+
 if __name__ == "__main__":
     if len(sys.argv) != 2:
         print("Arguments are not valid. Usage: [name of the node]")
         exit(-1)
 
     context = zmq.Context()
+
+    signal.signal(signal.SIGINT, signal_handler)
 
     read_config_file("config.ini", sys.argv[1])
 
@@ -137,4 +151,3 @@ if __name__ == "__main__":
 
     link_layer_server_thread.join()
     network_layer_listener_thread.join()
-

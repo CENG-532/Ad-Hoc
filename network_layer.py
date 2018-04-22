@@ -6,6 +6,7 @@ import sys
 import configparser
 import math
 import time
+import signal
 
 from collections import namedtuple
 
@@ -30,7 +31,7 @@ scope_interval = []
 
 scope_clocks = []
 
-fish_eye_ranges = []
+fish_eye_scopes = []
 
 number_of_scopes = 2
 
@@ -46,7 +47,7 @@ network_layer_down_stream_address = "tcp://127.0.0.1:5556"  # network layer down
 
 app_layer_address = "tcp://127.0.0.1:5557"  # application layer
 
-ip_address_self = ""
+ip_address_self = (None, None)
 
 port_number_self = None
 
@@ -66,10 +67,19 @@ max_last_heard_time = None
 # here we need atomic data structure for rooting algorithm
 
 def node_init():
+    global topology_table
     # the initialization message that all nodes are going to send to each other.
-    message = packet("Pbroad", ip_address_self, name_self, sequence, topology_table,
+    topology_table[name_self]["ip_address"] = ip_address_self
+    topology_table[name_self]["neighbor_list"] = []
+    topology_table[name_self]["position"] = position_self
+    topology_table[name_self]["need_to_send"] = False
+    topology_table[name_self]["sequence"] = 0
+    topology_table[name_self]["last_heard_time"] = time.time()
+
+    message = packet("broadcast", ip_address_self, name_self, sequence, topology_table,
                      ("255.255.255.255", link_layer_port_number),
                      "", position_self, "")
+
     link_layer_message_queue.put(message)
 
 
@@ -88,6 +98,7 @@ def find_shortest_path():
     for x in known_nodes:
         pos_x = topology_table[x]["position"]
         if x is not name_self:
+            routing_table[x] = {}
             if x in topology_table[name_self]["neighbor_list"]:
                 routing_table[x]["distance"] = calculate_distance(position_self, pos_x)
                 routing_table[x]["next_hop"] = topology_table[x]["ip_address"]
@@ -111,10 +122,10 @@ def find_shortest_path():
                     min_distance = distance
                     min_k, min_pos_k, min_l, min_pos_l = k, pos_k, l, pos_l
             p.append(k)
-        if is_changed:
-            is_changed = False
-            routing_table[min_k]["distance"] = min_distance
-            routing_table[min_k]["next_hop"] = routing_table[min_l]["next_hop"]
+            if is_changed:
+                is_changed = False
+                routing_table[min_k]["distance"] = min_distance
+                routing_table[min_k]["next_hop"] = routing_table[min_l]["next_hop"]
 
     topology_table_changed = False
 
@@ -134,8 +145,10 @@ def process_packet(message):
     if name in topology_table[name_self]["neighbor_list"]:
         topology_table[name]["position"] = position
         topology_table[name]["sequence"] += 1
+        topology_table_changed = True
     else:
         topology_table[name_self]["neighbor_list"].append(name)
+        topology_table_changed = True
 
     for dest_in_packet in packet_link_state:
         if dest_in_packet not in topology_table:
@@ -149,7 +162,7 @@ def process_packet(message):
                 topology_table[dest_in_packet]["last_heard_time"] = time.time()
                 topology_table_changed = True
             else:
-                topology_table[name]["needToSend"] = True
+                topology_table[name]["need_to_send"] = True
 
 
 def check_neighbors():
@@ -199,7 +212,7 @@ def periodic_routing_update():
     inserted_nodes = []
 
     for scope in range(number_of_scopes):
-        fish_eye_range = fish_eye_ranges[scope]
+        fish_eye_range = fish_eye_scopes[scope]
         is_time_elapsed = check_elapsed_time(current_time, scope)
         for node in known_nodes:
             if node not in inserted_nodes and routing_table[node]["distance"] < fish_eye_range and is_time_elapsed:
@@ -227,14 +240,15 @@ def query_address():
 def update_routing_table(message):
     # here we need to to update routing table based on the algorithm we use.
     routing_table_mutex.acquire()
-    pass
+    process_packet(message)
+
+    if topology_table_changed:
+        find_shortest_path()
+
     routing_table_mutex.release()
 
-    process_packet(message)
     # here reset the topology table I guess,
     # we need to check the structure here as well.
-    topology_table["link_state"][name_self] = neighbor_list
-    find_shortest_path()
     periodic_routing_update()
 
 
@@ -286,7 +300,7 @@ def link_layer_client():
         message = link_layer_message_queue.get()
 
         if not _is_control_message(message.type):
-            message.next_hop = find_routing(message.destination)
+            message = message._replace(next_hop=find_routing(message.destination))
 
         client_socket.send(pickle.dumps(message))
 
@@ -302,27 +316,36 @@ def read_config_file(filename, name):
     config.read(filename)
     default_settings = config["DEFAULT"]
     node_settings = config[name]
+
     ip_address_self = node_settings["ip"]
-    port_read = ip_address_self.split(":")
-    port_number_self = int(port_read[1][:-1])
-    ip_address_self = (port_read[0], port_number_self)
-    link_layer_port_number = default_settings["link_layer_port_number"]
+    link_layer_port_number = int(default_settings["link_layer_port_number"])
+
+    ip_address_self = (ip_address_self, link_layer_port_number)
+
+    print(ip_address_self)
 
     scope_interval.append(int(default_settings["scope_interval_1"]))
     scope_interval.append(int(default_settings["scope_interval_2"]))
 
-    fish_eye_ranges.append(int(default_settings["fish_eye_range_1"]))
-    fish_eye_ranges.append(int(default_settings["fish_eye_range_2"]))
+    fish_eye_scopes.append(int(default_settings["fish_eye_scope_1"]))
+    fish_eye_scopes.append(int(default_settings["fish_eye_scope_2"]))
 
     max_last_heard_time = int(default_settings["max_last_heard_time"])
 
-    number_of_scopes = len(fish_eye_ranges)
+    number_of_scopes = len(fish_eye_scopes)
 
     position_self = (float(node_settings["positionX"]), float(node_settings["positionX"]))
 
     current_time = time.time()
 
     scope_clocks = [current_time for _ in scope_interval]
+
+
+def signal_handler(signal, frame):
+    context.term()
+    context.destroy()
+    print("you pressed on ctrl+c")
+    sys.exit()
 
 
 if __name__ == "__main__":
@@ -332,6 +355,8 @@ if __name__ == "__main__":
 
     read_config_file("config.ini", sys.argv[1])
     context = zmq.Context()
+
+    signal.signal(signal.SIGINT, signal_handler)
 
     network_layer_up_thread = threading.Thread(target=app_layer_listener, args=())
     network_layer_down_thread = threading.Thread(target=link_layer_listener, args=())

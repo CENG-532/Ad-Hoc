@@ -1,10 +1,15 @@
 import zmq
 import threading
 import pickle
+import signal
+import sys
 
 from collections import namedtuple
 
-packet = namedtuple("packet", ["type", "source", "destination", "next_hop", "position", "message"])
+packet = namedtuple("packet",
+                    ["type", "source", "name", "sequence", "link_state", "destination", "next_hop",
+                     "position",
+                     "message"])
 application_layer_address = "tcp://127.0.0.1:5557"  # application layer address
 network_layer_up_stream = "tcp://127.0.0.1:5555"  # network layer up stream
 
@@ -22,8 +27,16 @@ def get_message_to_send(context):
         client_socket.send(pickle.dumps(packet_to_send))
 
 
+def signal_handler(signal, frame):
+    context.term()
+    context.destroy()
+    sys.exit()
+
+
 if __name__ == "__main__":
     context = zmq.Context()
+    signal.signal(signal.SIGINT, signal_handler)
+
     server_socket = context.socket(zmq.PULL)
     server_socket.bind(application_layer_address)
     server_socket.setsockopt(zmq.LINGER, 0)
