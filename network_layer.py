@@ -69,6 +69,7 @@ max_last_heard_time = None
 def node_init():
     global topology_table
     # the initialization message that all nodes are going to send to each other.
+    topology_table[name_self] = {}
     topology_table[name_self]["ip_address"] = ip_address_self
     topology_table[name_self]["neighbor_list"] = []
     topology_table[name_self]["position"] = position_self
