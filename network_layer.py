@@ -39,6 +39,8 @@ number_of_scopes = 2
 
 link_layer_message_queue = queue.Queue()  # queue holds messages in original format.
 
+broadcast_message_queue = queue.Queue()
+
 link_layer_up_stream_address = "tcp://127.0.0.1:5554"  # link layer address
 
 network_layer_up_stream_address = "tcp://127.0.0.1:5555"  # network layer up stream
@@ -85,7 +87,7 @@ def node_init():
                      broadcast_address,
                      "", position_self, "")
     topology_table[name_self]["sequence_number"] += 1
-    link_layer_message_queue.put(message)
+    broadcast_message_queue.put(message)
 
 
 def calculate_distance(pos1, pos2):
@@ -107,10 +109,6 @@ def find_shortest_path():
     routing_table[name_self] = {"dest_addr": ip_address_self, "next_hop": ip_address_self, "distance": 0}
     self_position = topology_table[name_self]["position"]
     p = [name_self]
-
-
-
-
 
     for x in topology_table:
         pos_x = topology_table[x]["position"]
@@ -189,7 +187,8 @@ def process_packet(message):
             #     topology_table_changed = True
             # else:
             #     topology_table[dest_in_packet]["need_to_send"] = True
-            if len(topology_table[dest_in_packet]["neighbor_list"]) < len(packet_link_state[dest_in_packet]["neighbor_list"]):
+            if len(topology_table[dest_in_packet]["neighbor_list"]) < len(
+                    packet_link_state[dest_in_packet]["neighbor_list"]):
                 topology_table[dest_in_packet] = packet_link_state[dest_in_packet]
         if dest_in_packet == name:
             topology_table[dest_in_packet]["sequence_number"] += 1
@@ -227,7 +226,7 @@ def periodic_routing_update():
 
     # I have added necessary parts roughly. We can check both the packet type and structural design tomorrow.
     while True:
-        time.sleep(scope_interval[0] / 1600)
+        time.sleep(scope_interval[0] / 1000)
 
         current_time = time.time()
 
@@ -269,7 +268,7 @@ def periodic_routing_update():
         # print("ben icindeyim, al bu da flaG:", link_state_changed)
 
         if link_state_changed:
-            link_layer_message_queue.put(message)
+            broadcast_message_queue.put(message)
             topology_table[name_self]["sequence_number"] += 1
 
 
@@ -330,8 +329,8 @@ def link_layer_listener():
             update_routing_table(message)
         elif _is_destination_self(message.destination):
             client_socket.send(message_raw)
-        else:
-            message = message._replace(position= position_self)
+        else:  # redirect
+            message = message._replace(position=position_self)
             link_layer_message_queue.put(message)
 
 
@@ -359,9 +358,17 @@ def link_layer_client():
         # for elem in iter(link_layer_message_queue.get, None):
         #     print(elem)
 
-        if not _is_control_message(message.type):
-            message = message._replace(next_hop=find_routing(message.destination))
-            print(message, "size:", link_layer_message_queue.qsize())
+        message = message._replace(next_hop=find_routing(message.destination))
+        print(message, "size:", link_layer_message_queue.qsize())
+
+        client_socket.send(pickle.dumps(message))
+
+
+def broadcast_packet_client():
+    client_socket = context.socket(zmq.PUSH)
+    client_socket.connect(link_layer_up_stream_address)
+    while True:
+        message = broadcast_message_queue.get()
 
         client_socket.send(pickle.dumps(message))
 
@@ -433,14 +440,17 @@ if __name__ == "__main__":
     network_layer_up_thread = threading.Thread(target=app_layer_listener, args=())
     network_layer_down_thread = threading.Thread(target=link_layer_listener, args=())
     link_layer_client_thread = threading.Thread(target=link_layer_client, args=())
+    broadcast_packet_client_thread = threading.Thread(target=broadcast_packet_client, args=())
     periodic_update_thread = threading.Thread(target=periodic_routing_update, args=())
 
     network_layer_up_thread.start()
     network_layer_down_thread.start()
     link_layer_client_thread.start()
     periodic_update_thread.start()
+    broadcast_packet_client_thread.start()
 
     network_layer_down_thread.join()
     network_layer_up_thread.join()
     link_layer_client_thread.join()
     periodic_update_thread.join()
+    broadcast_packet_client_thread.join()
