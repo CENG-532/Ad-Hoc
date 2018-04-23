@@ -41,13 +41,13 @@ known_nodes = {}
 
 link_layer_message_queue = queue.Queue()  # queue holds messages in original format.
 
-link_layer_address = "tcp://127.0.0.1:5554"  # link layer address
+link_layer_up_stream_address = "tcp://127.0.0.1:5554"  # link layer address
 
 network_layer_up_stream_address = "tcp://127.0.0.1:5555"  # network layer up stream
 
 network_layer_down_stream_address = "tcp://127.0.0.1:5556"  # network layer down stream
 
-app_layer_address = "tcp://127.0.0.1:5557"  # application layer
+application_layer_address = "tcp://127.0.0.1:5557"  # application layer
 
 ip_address_self = (None, None)
 
@@ -64,6 +64,8 @@ topology_table_changed = False
 max_last_heard_time = None
 
 broad_cast_address = None
+
+communication_range = None
 
 
 # here define rooting algorithm
@@ -165,7 +167,7 @@ def process_packet(message):
         # print("packet_link_stat: ", packet_link_state)
         topology_table_changed = True
 
-    print("received message", message)
+    # print("received message", message)
 
     for dest_in_packet in packet_link_state:
         if dest_in_packet not in topology_table:
@@ -241,8 +243,9 @@ def periodic_routing_update():
                 routing_table_mutex.acquire()
                 topology_table_mutex.acquire()
                 try:
-                    if node not in inserted_nodes and routing_table[node][
-                        "distance"] < fish_eye_range and is_time_elapsed:
+                    if node not in inserted_nodes \
+                            and routing_table[node]["distance"] < fish_eye_range \
+                            and is_time_elapsed:
                         message.link_state[node] = topology_table[node]
                         inserted_nodes.append(node)
                         link_state_changed = True
@@ -265,6 +268,7 @@ def find_routing(destination):
     except KeyError:
         next_hop = ""
     routing_table_mutex.release()
+    print("roootung table:", routing_table)
     return next_hop
 
 
@@ -292,7 +296,7 @@ def _is_control_message(message_type):
 
 
 def _is_destination_self(destination):
-    return destination == ip_address_self
+    return destination == ip_address_self or name_self == destination
 
 
 def link_layer_listener():
@@ -301,11 +305,13 @@ def link_layer_listener():
     server_socket.setsockopt(zmq.LINGER, 0)
 
     client_socket = context.socket(zmq.PUSH)
-    client_socket.connect(app_layer_address)
+    client_socket.connect(application_layer_address)
 
     while True:
         message_raw = server_socket.recv()
         message = pickle.loads(message_raw)
+        if message.link_state == {}:
+            print("message_received:", message)
 
         if _is_control_message(message.type):
             update_routing_table(message)
@@ -324,18 +330,23 @@ def app_layer_listener():
     node_init()
 
     while True:
-        message = server_socket.recv()
-        link_layer_message_queue.put(pickle.loads(message))
+        message_raw = server_socket.recv()
+        message = pickle.loads(message_raw)
+        message = message._replace(position=position_self, source=ip_address_self, name=name_self, sequence=sequence)
+        link_layer_message_queue.put(message)
 
 
 def link_layer_client():
     client_socket = context.socket(zmq.PUSH)
-    client_socket.connect(link_layer_address)
+    client_socket.connect(link_layer_up_stream_address)
     while True:
         message = link_layer_message_queue.get()
+        # for elem in iter(link_layer_message_queue.get, None):
+        #     print(elem)
 
         if not _is_control_message(message.type):
             message = message._replace(next_hop=find_routing(message.destination))
+            print(message, "size:", link_layer_message_queue.qsize())
 
         client_socket.send(pickle.dumps(message))
 
@@ -345,12 +356,23 @@ def read_config_file(filename, name):
     global number_of_scopes, port_number_self, link_layer_port_number
     global max_last_heard_time
     global scope_clocks, broad_cast_address
+    global network_layer_down_stream_address, network_layer_up_stream_address
+    global link_layer_up_stream_address, application_layer_address
+    global communication_range
 
     name_self = name
     config = configparser.ConfigParser()
     config.read(filename)
     default_settings = config["DEFAULT"]
     node_settings = config[name]
+
+    communication_range = int(default_settings["range"])
+
+    # read addresses
+    application_layer_address = node_settings["application_layer_address"]
+    network_layer_up_stream_address = node_settings["network_layer_up_stream_address"]
+    network_layer_down_stream_address = node_settings["network_layer_down_stream_address"]
+    link_layer_up_stream_address = node_settings["link_layer_up_stream_address"]
 
     ip_address_self = node_settings["ip"]
     link_layer_port_number = int(default_settings["link_layer_port_number"])

@@ -87,6 +87,8 @@ def network_layer_listener():
         message = pickle.loads(message_raw)
         # depending on the message command, which can be decided after a discussion, we can define set of commands.
         ip = get_ip(message)
+        if ip == -1:
+            continue
         # since we only care about ip address of the message to be sent, there is no need to check for extra stuff here.
         # print(message)
         udp_client.sendto(message_raw, ip)
@@ -111,6 +113,7 @@ def link_layer_listener():
 
 def read_config_file(filename, name):
     global ip_address_self, communication_range, position_self, link_layer_port_number, name_self
+    global network_layer_down_stream_address, link_layer_up_stream_address
 
     config = configparser.ConfigParser()
     config.read(filename)
@@ -118,6 +121,9 @@ def read_config_file(filename, name):
     default_settings = config["DEFAULT"]
     node_settings = config[name]
     name_self = name
+
+    network_layer_down_stream_address = node_settings["network_layer_down_stream_address"]
+    link_layer_up_stream_address = node_settings["link_layer_up_stream_address"]
 
     ip_address_self = node_settings["ip"]
     link_layer_port_number = int(default_settings["link_layer_port_number"])
