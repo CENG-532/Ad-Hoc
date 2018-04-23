@@ -266,7 +266,7 @@ def find_routing(destination):
     try:
         next_hop = routing_table[destination]["next_hop"]
     except KeyError:
-        next_hop = ""
+        next_hop = -1
     routing_table_mutex.release()
     print("roootung table:", routing_table)
     return next_hop

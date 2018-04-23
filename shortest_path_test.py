@@ -7,7 +7,7 @@ known_nodes = ["A", "B", "C", "D", "E"]
 topology_table = {"A": {"position": (0, 0), "ip_address": "A_IP", "neighbor_list": ["E"]},
                   "B": {"position": (10, 10), "ip_address": "B_IP", "neighbor_list": ["E", "D"]},
                   "C": {"position": (20, 20), "ip_address": "C_IP", "neighbor_list": ["D"]},
-                  "D": {"position": (153, 153), "ip_address": "D_IP", "neighbor_list": []},
+                  "D": {"position": (15, 15), "ip_address": "D_IP", "neighbor_list": []},
                   "E": {"position": (5, 5), "ip_address": "E_IP", "neighbor_list": ["A", "B"]}}
 
 routing_table = {}
