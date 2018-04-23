@@ -103,7 +103,7 @@ def link_layer_listener():
     worker_thread.start()
 
     while True:
-        message = server_socket.recv(1024)
+        message = server_socket.recv(10240)
 
         server_message_queue.put(message)
 

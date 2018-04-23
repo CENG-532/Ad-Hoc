@@ -30,6 +30,8 @@ def find_shortest_path():
     global routing_table
     global topology_table_changed
 
+    print("TOPOLOGY: ", topology_table)
+
     # dijkstra shortest-path algorithm
     routing_table[name_self] = {"dest_addr": ip_address_self, "next_hop": ip_address_self, "distance": 0}
     self_position = topology_table[name_self]["position"]

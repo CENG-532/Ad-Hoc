@@ -37,8 +37,6 @@ fish_eye_scopes = []
 
 number_of_scopes = 2
 
-known_nodes = {}
-
 link_layer_message_queue = queue.Queue()  # queue holds messages in original format.
 
 link_layer_up_stream_address = "tcp://127.0.0.1:5554"  # link layer address
@@ -86,10 +84,12 @@ def node_init():
     message = packet("broadcast", ip_address_self, name_self, sequence, topology_table,
                      broadcast_address,
                      "", position_self, "")
+    topology_table[name_self]["sequence_number"] += 1
     link_layer_message_queue.put(message)
 
 
 def calculate_distance(pos1, pos2):
+    global communication_range
     result = math.sqrt(math.pow(pos1[0] - pos2[0], 2) + math.pow(pos1[1] - pos2[1], 2))
     if communication_range < result:
         return float("inf")
@@ -97,17 +97,22 @@ def calculate_distance(pos1, pos2):
 
 
 def find_shortest_path():
+    topology_table_mutex.acquire()
     global routing_table
     global topology_table_changed
+
+    # print("TOPOLOGY IN SHORTEST: ", topology_table)
 
     # dijkstra shortest-path algorithm
     routing_table[name_self] = {"dest_addr": ip_address_self, "next_hop": ip_address_self, "distance": 0}
     self_position = topology_table[name_self]["position"]
     p = [name_self]
 
-    topology_table_mutex.acquire()
 
-    for x in known_nodes:
+
+
+
+    for x in topology_table:
         pos_x = topology_table[x]["position"]
         if x is not name_self:
             routing_table[x] = {}
@@ -118,9 +123,9 @@ def find_shortest_path():
                 routing_table[x]["distance"] = float("inf")
                 routing_table[x]["next_hop"] = -1
 
-    while list(set(known_nodes) - set(p)):
+    while list(set(topology_table) - set(p)):
         min_node = None
-        for node in list(set(known_nodes) - set(p)):
+        for node in list(set(topology_table) - set(p)):
             if min_node is None:
                 min_node = node
             elif routing_table[min_node]["distance"] > routing_table[node]["distance"]:
@@ -130,6 +135,7 @@ def find_shortest_path():
         p.append(min_node)
         pos_min_node = topology_table[min_node]["position"]
         for neighbor in list(set(topology_table[min_node]["neighbor_list"]) - set(p)):
+            # print("BEFORE FOR: ", neighbor, routing_table)
             pos_neighbor = topology_table[neighbor]["position"]
             distance = calculate_distance(pos_min_node, pos_neighbor) + routing_table[min_node]["distance"]
             if round(distance, 2) < round(routing_table[neighbor]["distance"], 2):
@@ -144,7 +150,7 @@ def find_shortest_path():
 def process_packet(message):
     # process packet cannot get the lock, which is because periodic update runs more.
     global topology_table, topology_table_changed
-    global sequence, known_nodes
+    global sequence
 
     topology_table_changed = False
 
@@ -156,13 +162,14 @@ def process_packet(message):
     packet_link_state = message.link_state
 
     topology_table_mutex.acquire()
-    known_nodes[name] = 1
 
     if name in topology_table[name_self]["neighbor_list"]:
         topology_table[name]["position"] = position
         topology_table[name]["sequence_number"] += 1
         topology_table_changed = True
     else:
+        print("neighbor to add: ", name)
+        print("MESSAGE: ", message)
         topology_table[name_self]["neighbor_list"].append(name)
         # print("packet_link_stat: ", packet_link_state)
         topology_table_changed = True
@@ -175,13 +182,17 @@ def process_packet(message):
             topology_table[dest_in_packet]["last_heard_time"] = time.time()
             topology_table_changed = True
         else:
-            if topology_table[dest_in_packet]["sequence_number"] < packet_link_state[dest_in_packet]["sequence_number"]:
+            # topology_table[dest_in_packet] = packet_link_state[dest_in_packet]
+            # if topology_table[dest_in_packet]["sequence_number"] < packet_link_state[dest_in_packet]["sequence_number"]:
+            #     topology_table[dest_in_packet] = packet_link_state[dest_in_packet]
+            #     topology_table[dest_in_packet]["last_heard_time"] = time.time()
+            #     topology_table_changed = True
+            # else:
+            #     topology_table[dest_in_packet]["need_to_send"] = True
+            if len(topology_table[dest_in_packet]["neighbor_list"]) < len(packet_link_state[dest_in_packet]["neighbor_list"]):
                 topology_table[dest_in_packet] = packet_link_state[dest_in_packet]
-                topology_table[dest_in_packet]["last_heard_time"] = time.time()
-                topology_table_changed = True
-            else:
-                topology_table[name]["need_to_send"] = True
-        topology_table[dest_in_packet]["sequence_number"] += 1
+        if dest_in_packet == name:
+            topology_table[dest_in_packet]["sequence_number"] += 1
 
     topology_table_mutex.release()
 
@@ -190,7 +201,7 @@ def check_neighbors():
     to_be_deleted_neighbors = []
     for neighbor in topology_table[name_self]["neighbor_list"]:
         try:
-            if routing_table[neighbor]["distance"] == sys.maxsize:
+            if routing_table[neighbor]["distance"] == float("inf"):
                 to_be_deleted_neighbors.append(neighbor)
         except KeyError:
             continue
@@ -239,9 +250,10 @@ def periodic_routing_update():
         for scope in range(number_of_scopes):
             fish_eye_range = fish_eye_scopes[scope]
             is_time_elapsed = check_elapsed_time(current_time, scope)
-            for node in known_nodes:
-                routing_table_mutex.acquire()
-                topology_table_mutex.acquire()
+            routing_table_mutex.acquire()
+            topology_table_mutex.acquire()
+            for node in topology_table:
+
                 try:
                     if node not in inserted_nodes \
                             and routing_table[node]["distance"] < fish_eye_range \
@@ -251,13 +263,14 @@ def periodic_routing_update():
                         link_state_changed = True
                 except KeyError:
                     pass
-                topology_table_mutex.release()
-                routing_table_mutex.release()
+            topology_table_mutex.release()
+            routing_table_mutex.release()
 
         # print("ben icindeyim, al bu da flaG:", link_state_changed)
 
         if link_state_changed:
             link_layer_message_queue.put(message)
+            topology_table[name_self]["sequence_number"] += 1
 
 
 def find_routing(destination):
@@ -318,6 +331,7 @@ def link_layer_listener():
         elif _is_destination_self(message.destination):
             client_socket.send(message_raw)
         else:
+            message = message._replace(position= position_self)
             link_layer_message_queue.put(message)
 
 
@@ -331,6 +345,7 @@ def app_layer_listener():
 
     while True:
         message_raw = server_socket.recv()
+
         message = pickle.loads(message_raw)
         message = message._replace(position=position_self, source=ip_address_self, name=name_self, sequence=sequence)
         link_layer_message_queue.put(message)
