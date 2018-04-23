@@ -164,12 +164,11 @@ def process_packet(message):
         # print("packet_link_stat: ", packet_link_state)
         topology_table_changed = True
 
-    print("topo in process: ", topology_table)
+    print("received message", message)
 
     for dest_in_packet in packet_link_state:
         if dest_in_packet not in topology_table:
             topology_table[dest_in_packet] = packet_link_state[dest_in_packet]
-            topology_table[dest_in_packet]["sequence_number"] += 1
             topology_table[dest_in_packet]["last_heard_time"] = time.time()
             topology_table_changed = True
         else:
@@ -179,6 +178,7 @@ def process_packet(message):
                 topology_table_changed = True
             else:
                 topology_table[name]["need_to_send"] = True
+        topology_table[dest_in_packet]["sequence_number"] += 1
 
     topology_table_mutex.release()
 
@@ -213,9 +213,12 @@ def periodic_routing_update():
 
     # I have added necessary parts roughly. We can check both the packet type and structural design tomorrow.
     while True:
-        to_be_deleted_neighbors = []
+        time.sleep(scope_interval[0] / 1600)
 
         current_time = time.time()
+
+        to_be_deleted_neighbors = []
+
 
         # for neighbor in topology_table[name_self]["neighbor_list"]:
         #     if topology_table[neighbor]["last_heard_time"] + max_last_heard_time < current_time:
@@ -230,7 +233,6 @@ def periodic_routing_update():
         link_state_changed = False
 
         inserted_nodes = []
-        print("topo in period:", topology_table)
 
         for scope in range(number_of_scopes):
             fish_eye_range = fish_eye_scopes[scope]
@@ -251,7 +253,6 @@ def periodic_routing_update():
         # print("ben icindeyim, al bu da flaG:", link_state_changed)
 
         if link_state_changed:
-            sequence += 1
             link_layer_message_queue.put(message)
 
 
@@ -272,8 +273,9 @@ def query_address():
 
 def update_routing_table(message):
     # here we need to to update routing table based on the algorithm we use.
-    routing_table_mutex.acquire()
     process_packet(message)
+
+    routing_table_mutex.acquire()
 
     if topology_table_changed:
         find_shortest_path()
