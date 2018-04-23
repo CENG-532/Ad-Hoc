@@ -92,7 +92,7 @@ def node_init():
 def calculate_distance(pos1, pos2):
     result = math.sqrt(math.pow(pos1[0] - pos2[0], 2) + math.pow(pos1[1] - pos2[1], 2))
     if communication_range < result:
-        return math.inf
+        return float("inf")
     return result
 
 
@@ -115,7 +115,7 @@ def find_shortest_path():
                 routing_table[x]["distance"] = calculate_distance(self_position, pos_x)
                 routing_table[x]["next_hop"] = topology_table[x]["ip_address"]
             else:
-                routing_table[x]["distance"] = math.inf
+                routing_table[x]["distance"] = float("inf")
                 routing_table[x]["next_hop"] = -1
 
     while list(set(known_nodes) - set(p)):
