@@ -34,6 +34,8 @@ ip_address_self = "127.0.0.1"
 
 link_layer_port_number = None
 
+name_self = None
+
 
 def get_ip(message):
     # we need both port numbers and IP addresses of destination.
@@ -66,7 +68,8 @@ def worker_listener(context):
         message_raw = server_message_queue.get()
         message = pickle.loads(message_raw)
 
-        if is_in_range(message.position):
+        if is_in_range(message.position) and message.name != name_self:
+            # print("message is loaded:", message)
             client_socket.send(message_raw)
 
 
@@ -85,14 +88,14 @@ def network_layer_listener():
         # depending on the message command, which can be decided after a discussion, we can define set of commands.
         ip = get_ip(message)
         # since we only care about ip address of the message to be sent, there is no need to check for extra stuff here.
-        print(message)
+        # print(message)
         udp_client.sendto(message_raw, ip)
 
 
 def link_layer_listener():
     server_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     server_socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-    server_socket.bind(ip_address_self)
+    server_socket.bind(("0.0.0.0", link_layer_port_number))
 
     worker_thread = threading.Thread(target=worker_listener, args=(context,))
     worker_thread.start()
@@ -102,17 +105,19 @@ def link_layer_listener():
 
         server_message_queue.put(message)
 
+
     worker_thread.join()
 
 
 def read_config_file(filename, name):
-    global ip_address_self, communication_range, position_self, link_layer_port_number
+    global ip_address_self, communication_range, position_self, link_layer_port_number, name_self
 
     config = configparser.ConfigParser()
     config.read(filename)
 
     default_settings = config["DEFAULT"]
     node_settings = config[name]
+    name_self = name
 
     ip_address_self = node_settings["ip"]
     link_layer_port_number = int(default_settings["link_layer_port_number"])
@@ -128,7 +133,6 @@ def read_config_file(filename, name):
 def signal_handler(signal, frame):
     context.term()
     context.destroy()
-    print("you pressed on ctrl+c")
     sys.exit()
 
 

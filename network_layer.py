@@ -15,7 +15,9 @@ packet = namedtuple("packet",
                      "position",
                      "message"])
 
-routing_table_mutex = threading.Lock()
+routing_table_mutex = threading.RLock()
+
+topology_table_mutex = threading.RLock()
 # this is a dictionary that we can keep names to corresponding IPs, also necessary routing information.
 
 neighbor_list = []  # nodes that are adjacent to the current node. (name, pos)
@@ -35,7 +37,7 @@ fish_eye_scopes = []
 
 number_of_scopes = 2
 
-known_nodes = []
+known_nodes = {}
 
 link_layer_message_queue = queue.Queue()  # queue holds messages in original format.
 
@@ -61,6 +63,8 @@ topology_table_changed = False
 
 max_last_heard_time = None
 
+broad_cast_address = None
+
 
 # here define rooting algorithm
 
@@ -74,13 +78,12 @@ def node_init():
     topology_table[name_self]["neighbor_list"] = []
     topology_table[name_self]["position"] = position_self
     topology_table[name_self]["need_to_send"] = False
-    topology_table[name_self]["sequence"] = 0
+    topology_table[name_self]["sequence_number"] = 0
     topology_table[name_self]["last_heard_time"] = time.time()
 
     message = packet("broadcast", ip_address_self, name_self, sequence, topology_table,
-                     ("255.255.255.255", link_layer_port_number),
+                     broad_cast_address,
                      "", position_self, "")
-
     link_layer_message_queue.put(message)
 
 
@@ -96,6 +99,8 @@ def find_shortest_path():
     # dijkstra shortest-path algorithm
     routing_table[name_self] = {"dest_addr": ip_address_self, "next_hop": ip_address_self, "distance": 0}
     p = [(name_self, position_self)]
+    topology_table_mutex.acquire()
+
     for x in known_nodes:
         pos_x = topology_table[x]["position"]
         if x is not name_self:
@@ -115,7 +120,7 @@ def find_shortest_path():
                 continue
             pos_k = topology_table[k]["position"]
             min_distance = routing_table[k]["distance"]
-            for l, pos_l in list(set(known_nodes) - set(p)):
+            for l in list(set(known_nodes) - set(p)):
                 pos_l = topology_table[l]["position"]
                 distance = calculate_distance(pos_l, pos_k) + routing_table[l]["distance"]
                 if round(distance, 2) < round(min_distance, 2):
@@ -130,26 +135,36 @@ def find_shortest_path():
 
     topology_table_changed = False
 
+    topology_table_mutex.release()
+
 
 def process_packet(message):
+    # process packet cannot get the lock, which is because periodic update runs more.
     global topology_table, topology_table_changed
-    global sequence
+    global sequence, known_nodes
 
     topology_table_changed = False
 
     source = message.source
     name = message.name
+
     position = message.position
     packet_sequence = int(message.sequence)
     packet_link_state = message.link_state
 
+    topology_table_mutex.acquire()
+    known_nodes[name] = 1
+
     if name in topology_table[name_self]["neighbor_list"]:
         topology_table[name]["position"] = position
-        topology_table[name]["sequence"] += 1
+        topology_table[name]["sequence_number"] += 1
         topology_table_changed = True
     else:
         topology_table[name_self]["neighbor_list"].append(name)
+        # print("packet_link_stat: ", packet_link_state)
         topology_table_changed = True
+
+    print("topo in process: ", topology_table)
 
     for dest_in_packet in packet_link_state:
         if dest_in_packet not in topology_table:
@@ -164,6 +179,8 @@ def process_packet(message):
                 topology_table_changed = True
             else:
                 topology_table[name]["need_to_send"] = True
+
+    topology_table_mutex.release()
 
 
 def check_neighbors():
@@ -193,34 +210,49 @@ def check_elapsed_time(current_time, scope):
 
 def periodic_routing_update():
     global sequence, max_last_heard_time, number_of_scopes
-    sequence += 1
 
     # I have added necessary parts roughly. We can check both the packet type and structural design tomorrow.
+    while True:
+        to_be_deleted_neighbors = []
 
-    to_be_deleted_neighbors = []
+        current_time = time.time()
 
-    current_time = time.time()
+        # for neighbor in topology_table[name_self]["neighbor_list"]:
+        #     if topology_table[neighbor]["last_heard_time"] + max_last_heard_time < current_time:
+        #         to_be_deleted_neighbors.append(neighbor)
+        #
 
-    for neighbor in topology_table[name_self]["neighbor_list"]:
-        if topology_table[neighbor]["last_heard_time"] + max_last_heard_time < current_time:
-            to_be_deleted_neighbors.append(neighbor)
+        clear_neighbors(to_be_deleted_neighbors)
 
-    clear_neighbors(to_be_deleted_neighbors)
+        message = packet("broadcast", ip_address_self, name_self, sequence, {name_self: topology_table[name_self]},
+                         broad_cast_address, "", position_self, "")
 
-    message = packet("broadcast", ip_address_self, name_self, sequence, {}, "255.255.255.255", "",
-                     position_self, "")
+        link_state_changed = False
 
-    inserted_nodes = []
+        inserted_nodes = []
+        print("topo in period:", topology_table)
 
-    for scope in range(number_of_scopes):
-        fish_eye_range = fish_eye_scopes[scope]
-        is_time_elapsed = check_elapsed_time(current_time, scope)
-        for node in known_nodes:
-            if node not in inserted_nodes and routing_table[node]["distance"] < fish_eye_range and is_time_elapsed:
-                message.link_state[node] = topology_table[node]
-                inserted_nodes.append(node)
+        for scope in range(number_of_scopes):
+            fish_eye_range = fish_eye_scopes[scope]
+            is_time_elapsed = check_elapsed_time(current_time, scope)
+            for node in known_nodes:
+                routing_table_mutex.acquire()
+                topology_table_mutex.acquire()
+                try:
+                    if node not in inserted_nodes and routing_table[node]["distance"] < fish_eye_range and is_time_elapsed:
+                        message.link_state[node] = topology_table[node]
+                        inserted_nodes.append(node)
+                        link_state_changed = True
+                except KeyError:
+                    pass
+                topology_table_mutex.release()
+                routing_table_mutex.release()
 
-    link_layer_message_queue.put(message)
+        # print("ben icindeyim, al bu da flaG:", link_state_changed)
+
+        if link_state_changed:
+            sequence += 1
+            link_layer_message_queue.put(message)
 
 
 def find_routing(destination):
@@ -250,7 +282,6 @@ def update_routing_table(message):
 
     # here reset the topology table I guess,
     # we need to check the structure here as well.
-    periodic_routing_update()
 
 
 def _is_control_message(message_type):
@@ -310,7 +341,7 @@ def read_config_file(filename, name):
     global ip_address_self, name_self, position_self, scope_interval
     global number_of_scopes, port_number_self, link_layer_port_number
     global max_last_heard_time
-    global scope_clocks
+    global scope_clocks, broad_cast_address
 
     name_self = name
     config = configparser.ConfigParser()
@@ -322,6 +353,7 @@ def read_config_file(filename, name):
     link_layer_port_number = int(default_settings["link_layer_port_number"])
 
     ip_address_self = (ip_address_self, link_layer_port_number)
+    broad_cast_address = ("127.255.255.255", link_layer_port_number)
 
     print(ip_address_self)
 
@@ -345,7 +377,6 @@ def read_config_file(filename, name):
 def signal_handler(signal, frame):
     context.term()
     context.destroy()
-    print("you pressed on ctrl+c")
     sys.exit()
 
 
@@ -362,11 +393,14 @@ if __name__ == "__main__":
     network_layer_up_thread = threading.Thread(target=app_layer_listener, args=())
     network_layer_down_thread = threading.Thread(target=link_layer_listener, args=())
     link_layer_client_thread = threading.Thread(target=link_layer_client, args=())
+    periodic_update_thread = threading.Thread(target=periodic_routing_update, args=())
 
     network_layer_up_thread.start()
     network_layer_down_thread.start()
     link_layer_client_thread.start()
+    periodic_update_thread.start()
 
     network_layer_down_thread.join()
     network_layer_up_thread.join()
     link_layer_client_thread.join()
+    periodic_update_thread.join()
