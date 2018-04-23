@@ -12,18 +12,14 @@ from collections import namedtuple
 
 packet = namedtuple("packet",
                     ["type", "source", "name", "sequence", "link_state", "destination", "next_hop",
-                     "position",
-                     "message"])
+                     "position", "message", "timestamp", "hop_count"])
 
 routing_table_mutex = threading.RLock()
 
 topology_table_mutex = threading.RLock()
 # this is a dictionary that we can keep names to corresponding IPs, also necessary routing information.
 
-neighbor_list = []  # nodes that are adjacent to the current node. (name, pos)
-
 topology_table = {}
-# topology_table = {"name": {"address":, "sequence":, "lastHeardTime":, "neighbor_list":, "needToSend:" bool}}
 
 routing_table = {}
 
@@ -83,7 +79,7 @@ def node_init():
 
     message = packet("broadcast", ip_address_self, name_self, sequence, topology_table,
                      broadcast_address,
-                     "", position_self, "")
+                     "", position_self, "", time.time(), 0)
     topology_table[name_self]["sequence_number"] += 1
     link_layer_message_queue.put(message)
 
@@ -101,16 +97,10 @@ def find_shortest_path():
     global routing_table
     global topology_table_changed
 
-    # print("TOPOLOGY IN SHORTEST: ", topology_table)
-
     # dijkstra shortest-path algorithm
     routing_table[name_self] = {"dest_addr": ip_address_self, "next_hop": ip_address_self, "distance": 0}
     self_position = topology_table[name_self]["position"]
     p = [name_self]
-
-
-
-
 
     for x in topology_table:
         pos_x = topology_table[x]["position"]
@@ -135,7 +125,6 @@ def find_shortest_path():
         p.append(min_node)
         pos_min_node = topology_table[min_node]["position"]
         for neighbor in list(set(topology_table[min_node]["neighbor_list"]) - set(p)):
-            # print("BEFORE FOR: ", neighbor, routing_table)
             pos_neighbor = topology_table[neighbor]["position"]
             distance = calculate_distance(pos_min_node, pos_neighbor) + routing_table[min_node]["distance"]
             if round(distance, 2) < round(routing_table[neighbor]["distance"], 2):
@@ -168,13 +157,9 @@ def process_packet(message):
         topology_table[name]["sequence_number"] += 1
         topology_table_changed = True
     else:
-        print("neighbor to add: ", name)
-        print("MESSAGE: ", message)
+        print("\n (Network Layer) New neighbor added: ", name, flush=True)
         topology_table[name_self]["neighbor_list"].append(name)
-        # print("packet_link_stat: ", packet_link_state)
         topology_table_changed = True
-
-    # print("received message", message)
 
     for dest_in_packet in packet_link_state:
         if dest_in_packet not in topology_table:
@@ -189,7 +174,8 @@ def process_packet(message):
             #     topology_table_changed = True
             # else:
             #     topology_table[dest_in_packet]["need_to_send"] = True
-            if len(topology_table[dest_in_packet]["neighbor_list"]) < len(packet_link_state[dest_in_packet]["neighbor_list"]):
+            if len(topology_table[dest_in_packet]["neighbor_list"]) < len(
+                    packet_link_state[dest_in_packet]["neighbor_list"]):
                 topology_table[dest_in_packet] = packet_link_state[dest_in_packet]
         if dest_in_packet == name:
             topology_table[dest_in_packet]["sequence_number"] += 1
@@ -227,7 +213,7 @@ def periodic_routing_update():
 
     # I have added necessary parts roughly. We can check both the packet type and structural design tomorrow.
     while True:
-        time.sleep(scope_interval[0] / 1600)
+        time.sleep(scope_interval[0] / 100)
 
         current_time = time.time()
 
@@ -241,7 +227,7 @@ def periodic_routing_update():
         clear_neighbors(to_be_deleted_neighbors)
 
         message = packet("broadcast", ip_address_self, name_self, sequence, {name_self: topology_table[name_self]},
-                         broadcast_address, "", position_self, "")
+                         broadcast_address, "", position_self, "", time.time(), 0)
 
         link_state_changed = False
 
@@ -266,8 +252,6 @@ def periodic_routing_update():
             topology_table_mutex.release()
             routing_table_mutex.release()
 
-        # print("ben icindeyim, al bu da flaG:", link_state_changed)
-
         if link_state_changed:
             link_layer_message_queue.put(message)
             topology_table[name_self]["sequence_number"] += 1
@@ -281,7 +265,6 @@ def find_routing(destination):
     except KeyError:
         next_hop = -1
     routing_table_mutex.release()
-    print("roootung table:", routing_table)
     return next_hop
 
 
@@ -323,15 +306,13 @@ def link_layer_listener():
     while True:
         message_raw = server_socket.recv()
         message = pickle.loads(message_raw)
-        if message.link_state == {}:
-            print("message_received:", message)
 
         if _is_control_message(message.type):
             update_routing_table(message)
         elif _is_destination_self(message.destination):
             client_socket.send(message_raw)
         else:
-            message = message._replace(position= position_self)
+            message = message._replace(position=position_self, hop_count = message.hop_count + 1)
             link_layer_message_queue.put(message)
 
 
@@ -356,12 +337,10 @@ def link_layer_client():
     client_socket.connect(link_layer_up_stream_address)
     while True:
         message = link_layer_message_queue.get()
-        # for elem in iter(link_layer_message_queue.get, None):
-        #     print(elem)
 
         if not _is_control_message(message.type):
             message = message._replace(next_hop=find_routing(message.destination))
-            print(message, "size:", link_layer_message_queue.qsize())
+            print("\n (Network Layer) message \"%s\" forwarded from %s to %s" % (message.message, message.source, message.next_hop), flush=True)
 
         client_socket.send(pickle.dumps(message))
 
@@ -395,8 +374,6 @@ def read_config_file(filename, name):
     ip_address_self = (ip_address_self, link_layer_port_number)
     broadcast_address = (default_settings["broadcast_address"], link_layer_port_number)
 
-    print(ip_address_self)
-
     scope_interval.append(int(default_settings["scope_interval_1"]))
     scope_interval.append(int(default_settings["scope_interval_2"]))
 
@@ -422,7 +399,7 @@ def signal_handler(signal, frame):
 
 if __name__ == "__main__":
     if len(sys.argv) != 2:
-        print("Arguments are not valid. Usage: [name of the node]")
+        print("Arguments are not valid. Usage: [name of the node]", flush=True)
         exit(-1)
 
     read_config_file("config.ini", sys.argv[1])

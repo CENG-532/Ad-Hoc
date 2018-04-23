@@ -23,8 +23,7 @@ node_id = 10
 
 packet = namedtuple("packet",
                     ["type", "source", "name", "sequence", "link_state", "destination", "next_hop",
-                     "position",
-                     "message"])
+                     "position", "message", "timestamp", "hop_count"])
 
 network_layer_down_stream_address = "tcp://127.0.0.1:5556"  # network layer down stream
 
@@ -60,7 +59,7 @@ def is_in_range(position):
 
 
 def worker_listener(context):
-    print("worker thread is started.")
+    # print("worker thread is started.")
     client_socket = context.socket(zmq.PUSH)
     client_socket.connect(network_layer_down_stream_address)
 
@@ -74,7 +73,7 @@ def worker_listener(context):
 
 
 def network_layer_listener():
-    print("network layer listener is started")
+    # print("network layer listener is started")
     server_socket = context.socket(zmq.PULL)
     server_socket.bind(link_layer_up_stream_address)
     server_socket.setsockopt(zmq.LINGER, 0)
@@ -130,7 +129,7 @@ def read_config_file(filename, name):
 
     ip_address_self = (ip_address_self, link_layer_port_number)
 
-    print(ip_address_self)
+    print(ip_address_self, flush=True)
 
     position_self = (float(node_settings["positionX"]), float(node_settings["positionX"]))
     communication_range = float(config["DEFAULT"]["range"])
@@ -144,7 +143,7 @@ def signal_handler(signal, frame):
 
 if __name__ == "__main__":
     if len(sys.argv) != 2:
-        print("Arguments are not valid. Usage: [name of the node]")
+        print("Arguments are not valid. Usage: [name of the node]", flush=True)
         exit(-1)
 
     context = zmq.Context()

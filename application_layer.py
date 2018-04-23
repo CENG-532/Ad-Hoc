@@ -4,15 +4,17 @@ import pickle
 import signal
 import sys
 import configparser
+import time
 
 from collections import namedtuple
 
 packet = namedtuple("packet",
                     ["type", "source", "name", "sequence", "link_state", "destination", "next_hop",
-                     "position",
-                     "message"])
+                     "position", "message", "timestamp", "hop_count"])
 application_layer_address = "tcp://127.0.0.1:5557"  # application layer address
 network_layer_up_stream_address = "tcp://127.0.0.1:5555"  # network layer up stream
+
+f = open("time.txt", "w+")
 
 
 def get_message_to_send(context):
@@ -24,13 +26,14 @@ def get_message_to_send(context):
         message = input("message: ")
         destination = input("destination: ")
 
-        packet_to_send = packet("DATA", "", "", "", {}, destination, "", "", message)
+        packet_to_send = packet("DATA", "", "", "", {}, destination, "", "", message, time.time(), 0)
         client_socket.send(pickle.dumps(packet_to_send))
 
 
 def signal_handler(signal, frame):
     context.term()
     context.destroy()
+    f.close()
     sys.exit()
 
 
@@ -60,7 +63,11 @@ if __name__ == "__main__":
     while True:
         received_message = server_socket.recv()
         # process received message here
-        print(pickle.loads(received_message))
+        message = pickle.loads(received_message)
+        elapsed_time = time.time() - message.timestamp
+        print("\n (Application Layer) message \"%s\" received from %s within %f seconds in %d hops" %
+              (message.message, message.name, elapsed_time, message.hop_count+1), flush=True)
+        f.write("%d\r\n" % elapsed_time)
         # break on some condition
 
     send_thread.join()
