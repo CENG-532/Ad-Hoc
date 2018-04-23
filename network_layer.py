@@ -88,17 +88,21 @@ def node_init():
 
 
 def calculate_distance(pos1, pos2):
-    return math.sqrt(math.pow(pos1[0] - pos2[0], 2) + math.pow(pos1[1] - pos2[1], 2))
+    result = math.sqrt(math.pow(pos1[0] - pos2[0], 2) + math.pow(pos1[1] - pos2[1], 2))
+    if communication_range < result:
+        return math.inf
+    return result
 
 
 def find_shortest_path():
-    global position_self
     global routing_table
     global topology_table_changed
 
     # dijkstra shortest-path algorithm
     routing_table[name_self] = {"dest_addr": ip_address_self, "next_hop": ip_address_self, "distance": 0}
-    p = [(name_self, position_self)]
+    self_position = topology_table[name_self]["position"]
+    p = [name_self]
+
     topology_table_mutex.acquire()
 
     for x in known_nodes:
@@ -106,32 +110,29 @@ def find_shortest_path():
         if x is not name_self:
             routing_table[x] = {}
             if x in topology_table[name_self]["neighbor_list"]:
-                routing_table[x]["distance"] = calculate_distance(position_self, pos_x)
+                routing_table[x]["distance"] = calculate_distance(self_position, pos_x)
                 routing_table[x]["next_hop"] = topology_table[x]["ip_address"]
             else:
                 routing_table[x]["distance"] = math.inf
                 routing_table[x]["next_hop"] = -1
 
-    is_changed = False
     while list(set(known_nodes) - set(p)):
-        min_k, min_l, min_pos_k, min_pos_l = "", "", 0, 0
-        for k in topology_table:
-            if k == name_self:
-                continue
-            pos_k = topology_table[k]["position"]
-            min_distance = routing_table[k]["distance"]
-            for l in list(set(known_nodes) - set(p)):
-                pos_l = topology_table[l]["position"]
-                distance = calculate_distance(pos_l, pos_k) + routing_table[l]["distance"]
-                if round(distance, 2) < round(min_distance, 2):
-                    is_changed = True
-                    min_distance = distance
-                    min_k, min_pos_k, min_l, min_pos_l = k, pos_k, l, pos_l
-            p.append(k)
-            if is_changed:
-                is_changed = False
-                routing_table[min_k]["distance"] = min_distance
-                routing_table[min_k]["next_hop"] = routing_table[min_l]["next_hop"]
+        min_node = None
+        for node in list(set(known_nodes) - set(p)):
+            if min_node is None:
+                min_node = node
+            elif routing_table[min_node]["distance"] > routing_table[node]["distance"]:
+                min_node = node
+        if min_node is None:
+            break
+        p.append(min_node)
+        pos_min_node = topology_table[min_node]["position"]
+        for neighbor in list(set(topology_table[min_node]["neighbor_list"]) - set(p)):
+            pos_neighbor = topology_table[neighbor]["position"]
+            distance = calculate_distance(pos_min_node, pos_neighbor) + routing_table[min_node]["distance"]
+            if round(distance, 2) < round(routing_table[neighbor]["distance"], 2):
+                routing_table[neighbor]["distance"] = distance
+                routing_table[neighbor]["next_hop"] = routing_table[min_node]["next_hop"]
 
     topology_table_changed = False
 
@@ -219,7 +220,6 @@ def periodic_routing_update():
 
         to_be_deleted_neighbors = []
 
-
         # for neighbor in topology_table[name_self]["neighbor_list"]:
         #     if topology_table[neighbor]["last_heard_time"] + max_last_heard_time < current_time:
         #         to_be_deleted_neighbors.append(neighbor)
@@ -241,7 +241,8 @@ def periodic_routing_update():
                 routing_table_mutex.acquire()
                 topology_table_mutex.acquire()
                 try:
-                    if node not in inserted_nodes and routing_table[node]["distance"] < fish_eye_range and is_time_elapsed:
+                    if node not in inserted_nodes and routing_table[node][
+                        "distance"] < fish_eye_range and is_time_elapsed:
                         message.link_state[node] = topology_table[node]
                         inserted_nodes.append(node)
                         link_state_changed = True
