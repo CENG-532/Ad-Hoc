@@ -63,7 +63,7 @@ topology_table_changed = False
 
 max_last_heard_time = None
 
-broad_cast_address = None
+broadcast_address = None
 
 communication_range = None
 
@@ -84,7 +84,7 @@ def node_init():
     topology_table[name_self]["last_heard_time"] = time.time()
 
     message = packet("broadcast", ip_address_self, name_self, sequence, topology_table,
-                     broad_cast_address,
+                     broadcast_address,
                      "", position_self, "")
     link_layer_message_queue.put(message)
 
@@ -230,7 +230,7 @@ def periodic_routing_update():
         clear_neighbors(to_be_deleted_neighbors)
 
         message = packet("broadcast", ip_address_self, name_self, sequence, {name_self: topology_table[name_self]},
-                         broad_cast_address, "", position_self, "")
+                         broadcast_address, "", position_self, "")
 
         link_state_changed = False
 
@@ -355,7 +355,7 @@ def read_config_file(filename, name):
     global ip_address_self, name_self, position_self, scope_interval
     global number_of_scopes, port_number_self, link_layer_port_number
     global max_last_heard_time
-    global scope_clocks, broad_cast_address
+    global scope_clocks, broadcast_address
     global network_layer_down_stream_address, network_layer_up_stream_address
     global link_layer_up_stream_address, application_layer_address
     global communication_range
@@ -378,7 +378,7 @@ def read_config_file(filename, name):
     link_layer_port_number = int(default_settings["link_layer_port_number"])
 
     ip_address_self = (ip_address_self, link_layer_port_number)
-    broad_cast_address = ("127.255.255.255", link_layer_port_number)
+    broadcast_address = (default_settings["broadcast_address"], link_layer_port_number)
 
     print(ip_address_self)
 
