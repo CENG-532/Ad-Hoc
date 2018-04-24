@@ -1,0 +1,40 @@
+# How to run
+
+1) Put all .py files, run.sh file and config.ini file to the mininet environment through sftp
+    $ sftp mininet@<eth0-inet addr>
+2) Connect to mininet via ssh:
+    $ ssh -X mininet@<eth0-inet addr>
+
+3) Run the topology:
+    $ sudo mn --custom topology.py --topo mytopo --mac
+
+There are 5 nodes in the topology named:
+ -nodeA
+ -nodeB
+ -nodeC
+ -nodeD
+ -nodeE
+
+4) Open all the nodes via xterm:
+    $ xterm h1
+    $ xterm h2
+    $ xterm h3
+    $ xterm h4
+    $ xterm h5
+
+5) Start the node by running run.sh
+    $ ./run.sh nodeA
+    $ ./run.sh nodeB
+    $ ./run.sh nodeC
+    $ ./run.sh nodeD
+    $ ./run.sh nodeE
+
+6) After starting, node waits for a "command".
+    - Writing "auto" will send packets constructed from input_<nodename>.txt
+    - Writing "manual" will allow you to send packet from terminal
+        * First, write a message
+        * Then, write a destination
+
+* config.ini can be modified for different settings or topologies
+* In order to close a node, ctrl + c must be pressed 3 times (we could not find any better way because zeromq sockets are not closed upon a regular exit
+* Nodes are printing message information on network layer and application layer.

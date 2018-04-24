@@ -125,7 +125,10 @@ def find_shortest_path():
         p.append(min_node)
         pos_min_node = topology_table[min_node]["position"]
         for neighbor in list(set(topology_table[min_node]["neighbor_list"]) - set(p)):
-            pos_neighbor = topology_table[neighbor]["position"]
+            try:
+                pos_neighbor = topology_table[neighbor]["position"]
+            except KeyError:
+                continue
             distance = calculate_distance(pos_min_node, pos_neighbor) + routing_table[min_node]["distance"]
             if round(distance, 2) < round(routing_table[neighbor]["distance"], 2):
                 routing_table[neighbor]["distance"] = distance
@@ -213,7 +216,7 @@ def periodic_routing_update():
 
     # I have added necessary parts roughly. We can check both the packet type and structural design tomorrow.
     while True:
-        time.sleep(scope_interval[0] / 100)
+        time.sleep(scope_interval[0] / 1600)
 
         current_time = time.time()
 
