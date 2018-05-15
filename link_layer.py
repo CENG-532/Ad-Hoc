@@ -138,7 +138,7 @@ def link_layer_broadcast_listener():
 
 def worker_data_listener(client_socket, addr):
     while True:
-        message_raw = ip_address_to_tcp_queue[addr]
+        message_raw = ip_address_to_tcp_queue[addr].get()
         client_socket.send(message_raw)
 
 
@@ -152,7 +152,7 @@ def link_layer_data_listener():
     while True:
         connection_socket, addr = server_socket.accept()
         ip_address_to_tcp_queue[addr[0]] = queue.Queue()
-        active_connection_list.append(threading.Thread(target=worker_data_listener, args=(socket, addr,)))
+        active_connection_list.append(threading.Thread(target=worker_data_listener, args=(connection_socket, addr[0],)))
         active_connection_list[-1].start()
 
     for connection in active_connection_list:
@@ -206,9 +206,13 @@ if __name__ == "__main__":
 
     link_layer_server_thread = threading.Thread(target=link_layer_broadcast_listener, args=())
     network_layer_listener_thread = threading.Thread(target=network_layer_listener, args=())
+    link_layer_data_listener_thread = threading.Thread(target=link_layer_data_listener, args=())
 
     link_layer_server_thread.start()
     network_layer_listener_thread.start()
+    link_layer_data_listener_thread.start()
 
     link_layer_server_thread.join()
     network_layer_listener_thread.join()
+    link_layer_data_listener_thread.join()
+
