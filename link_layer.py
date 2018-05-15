@@ -31,9 +31,13 @@ link_layer_up_stream_address = "tcp://127.0.0.1:5554"  # link layer up stream
 
 ip_address_self = "127.0.0.1"
 
-link_layer_port_number = None
+link_layer_broadcast_port_number = None
+link_layer_data_port_number = None
 
 name_self = None
+broadcast_address = None
+
+ip_address_to_tcp_queue = {}
 
 
 def get_ip(message):
@@ -58,8 +62,8 @@ def is_in_range(position):
     return calculate_distance(position) <= communication_range
 
 
-def worker_listener(context):
-    # print("worker thread is started.")
+def worker_network_layer_informer(context):
+    print("worker thread is started.")
     client_socket = context.socket(zmq.PUSH)
     client_socket.connect(network_layer_down_stream_address)
 
@@ -81,6 +85,8 @@ def network_layer_listener():
     udp_client = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     udp_client.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
 
+    active_connections = []
+
     while True:
         message_raw = server_socket.recv()
         message = pickle.loads(message_raw)
@@ -88,17 +94,38 @@ def network_layer_listener():
         ip = get_ip(message)
         if ip == -1:
             continue
+        if ip[0] != broadcast_address:
+            # here put the datagram to the queue of tcp connection
+            try:
+                ip_address_to_tcp_queue[ip[0]].put(message_raw)
+            except KeyError:
+                # todo: you need to connect to the destination.
+                tcp_client_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+                tcp_client_socket.connect((ip[0], link_layer_data_port_number))
+                active_connections.append(threading.Thread(target=worker_data_listener,
+                                                           args=(tcp_client_socket, ip[0],)))
+                ip_address_to_tcp_queue[ip[0]] = queue.Queue()
+                ip_address_to_tcp_queue[ip[0]].put(message_raw)
+                active_connections[-1].start()
         # since we only care about ip address of the message to be sent, there is no need to check for extra stuff here.
         # print(message)
         udp_client.sendto(message_raw, ip)
 
+    for worker in active_connections:
+        worker.join()
 
-def link_layer_listener():
+
+# data - broadcast
+# data thread, every connection is thread (select)
+# every ip_address -> tcp_thread = data queue
+
+
+def link_layer_broadcast_listener():
     server_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     server_socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-    server_socket.bind(("0.0.0.0", link_layer_port_number))
+    server_socket.bind(("0.0.0.0", link_layer_broadcast_port_number))
 
-    worker_thread = threading.Thread(target=worker_listener, args=(context,))
+    worker_thread = threading.Thread(target=worker_network_layer_informer, args=(context,))
     worker_thread.start()
 
     while True:
@@ -106,13 +133,36 @@ def link_layer_listener():
 
         server_message_queue.put(message)
 
-
     worker_thread.join()
 
 
+def worker_data_listener(client_socket, addr):
+    while True:
+        message_raw = ip_address_to_tcp_queue[addr]
+        client_socket.send(message_raw)
+
+
+def link_layer_data_listener():
+    # this will listen tcp
+    server_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    server_socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+    server_socket.bind(("0.0.0.0", link_layer_data_port_number))
+    server_socket.listen(10)
+    active_connection_list = []
+    while True:
+        connection_socket, addr = server_socket.accept()
+        ip_address_to_tcp_queue[addr[0]] = queue.Queue()
+        active_connection_list.append(threading.Thread(target=worker_data_listener, args=(socket, addr,)))
+        active_connection_list[-1].start()
+
+    for connection in active_connection_list:
+        connection.join()
+
+
 def read_config_file(filename, name):
-    global ip_address_self, communication_range, position_self, link_layer_port_number, name_self
-    global network_layer_down_stream_address, link_layer_up_stream_address
+    global ip_address_self, communication_range, position_self, link_layer_broadcast_port_number, name_self
+    global network_layer_down_stream_address, link_layer_up_stream_address, link_layer_data_port_number
+    global broadcast_address
 
     config = configparser.ConfigParser()
     config.read(filename)
@@ -125,9 +175,11 @@ def read_config_file(filename, name):
     link_layer_up_stream_address = node_settings["link_layer_up_stream_address"]
 
     ip_address_self = node_settings["ip"]
-    link_layer_port_number = int(default_settings["link_layer_port_number"])
+    link_layer_broadcast_port_number = int(default_settings["link_layer_broadcast_port_number"])
+    link_layer_data_port_number = int(default_settings["link_layer_data_port_number"])
+    broadcast_address = default_settings["broadcast_address"]
 
-    ip_address_self = (ip_address_self, link_layer_port_number)
+    ip_address_self = (ip_address_self, link_layer_broadcast_port_number)
 
     print(ip_address_self, flush=True)
 
@@ -152,7 +204,7 @@ if __name__ == "__main__":
 
     read_config_file("config.ini", sys.argv[1])
 
-    link_layer_server_thread = threading.Thread(target=link_layer_listener, args=())
+    link_layer_server_thread = threading.Thread(target=link_layer_broadcast_listener, args=())
     network_layer_listener_thread = threading.Thread(target=network_layer_listener, args=())
 
     link_layer_server_thread.start()

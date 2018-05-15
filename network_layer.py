@@ -51,7 +51,7 @@ name_self = ""
 
 position_self = None
 
-link_layer_port_number = None
+link_layer_broadcast_port_number = None
 
 topology_table_changed = False
 
@@ -96,6 +96,8 @@ def find_shortest_path():
     topology_table_mutex.acquire()
     global routing_table
     global topology_table_changed
+
+    # print("TOPOLOGY IN SHORTEST: ", topology_table)
 
     # dijkstra shortest-path algorithm
     routing_table[name_self] = {"dest_addr": ip_address_self, "next_hop": ip_address_self, "distance": 0}
@@ -350,7 +352,7 @@ def link_layer_client():
 
 def read_config_file(filename, name):
     global ip_address_self, name_self, position_self, scope_interval
-    global number_of_scopes, port_number_self, link_layer_port_number
+    global number_of_scopes, port_number_self, link_layer_broadcast_port_number
     global max_last_heard_time
     global scope_clocks, broadcast_address
     global network_layer_down_stream_address, network_layer_up_stream_address
@@ -372,7 +374,7 @@ def read_config_file(filename, name):
     link_layer_up_stream_address = node_settings["link_layer_up_stream_address"]
 
     ip_address_self = node_settings["ip"]
-    link_layer_port_number = int(default_settings["link_layer_port_number"])
+    link_layer_port_number = int(default_settings["link_layer_broadcast_port_number"])
 
     ip_address_self = (ip_address_self, link_layer_port_number)
     broadcast_address = (default_settings["broadcast_address"], link_layer_port_number)
