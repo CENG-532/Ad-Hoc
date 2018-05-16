@@ -35,11 +35,13 @@ class MyTopo(Topo):
         switch1 = self.addSwitch('s1')
 
         # Add links
-        self.addLink(host1, switch1)
-        self.addLink(host2, switch1)
-        self.addLink(host3, switch1)
-        self.addLink(host4, switch1)
-        self.addLink(host5, switch1)
+        linkopts = dict(loss=0)
+
+        self.addLink(host1, switch1, **linkopts)
+        self.addLink(host2, switch1, **linkopts)
+        self.addLink(host3, switch1, **linkopts)
+        self.addLink(host4, switch1, **linkopts)
+        self.addLink(host5, switch1, **linkopts)
 
 
 topos = {'mytopo': (lambda: MyTopo())}

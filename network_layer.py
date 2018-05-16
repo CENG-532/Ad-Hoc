@@ -62,9 +62,19 @@ broadcast_address = None
 communication_range = None
 
 
-# here define rooting algorithm
+'''
+todo list:
+    * Leader election algorithm: 
+      https://ieeexplore.ieee.org/stamp/stamp.jsp?tp=&arnumber=1348124
+      To perform this paper we need to attain values to every node in the system.
+      We might need to support movements, or dynamic changes probably.
+        * on a dynamic change, we need to tear up the tcp connections to already established ones.
+        * Moreover, we need to the accept the latest routing information in the periodic updates as the routing table
+          will change dynamically.
+      We need new type of message. Probably [elect].
+   
+'''
 
-# here we need atomic data structure for rooting algorithm
 
 def node_init():
     global topology_table
@@ -218,7 +228,7 @@ def periodic_routing_update():
 
     # I have added necessary parts roughly. We can check both the packet type and structural design tomorrow.
     while True:
-        time.sleep(scope_interval[0] / 1600)
+        time.sleep(scope_interval[0] / 1000)
 
         current_time = time.time()
 

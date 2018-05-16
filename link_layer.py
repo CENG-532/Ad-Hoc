@@ -36,6 +36,7 @@ link_layer_data_port_number = None
 
 name_self = None
 broadcast_address = None
+close_tcp_connections = False
 
 ip_address_to_tcp_queue = {}
 
@@ -96,20 +97,31 @@ def network_layer_listener():
             continue
         if ip[0] != broadcast_address:
             # here put the datagram to the queue of tcp connection
+            print("this message is being sent", message)
             try:
                 ip_address_to_tcp_queue[ip[0]].put(message_raw)
             except KeyError:
                 # todo: you need to connect to the destination.
-                tcp_client_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-                tcp_client_socket.connect((ip[0], link_layer_data_port_number))
-                active_connections.append(threading.Thread(target=worker_data_listener,
-                                                           args=(tcp_client_socket, ip[0],)))
-                ip_address_to_tcp_queue[ip[0]] = queue.Queue()
-                ip_address_to_tcp_queue[ip[0]].put(message_raw)
-                active_connections[-1].start()
+                try:
+                    tcp_client_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+                    print("connecting to the ip:{} [{}]".format(ip[0], link_layer_data_port_number))
+                    tcp_client_socket.connect((ip[0], link_layer_data_port_number))
+                    active_connections.append(threading.Thread(target=worker_data_sender,
+                                                               args=(tcp_client_socket, ip[0],)))
+                    ip_address_to_tcp_queue[ip[0]] = queue.Queue()
+                    ip_address_to_tcp_queue[ip[0]].put(message_raw)
+                    active_connections[-1].start()
+                    active_connections.append(threading.Thread(target=worker_data_receiver,
+                                                               args=(tcp_client_socket, ip[0],)))
+                    active_connections[-1].start()
+                except OSError:
+                    print("got OSerror")
+                    continue
+
         # since we only care about ip address of the message to be sent, there is no need to check for extra stuff here.
         # print(message)
-        udp_client.sendto(message_raw, ip)
+        else:
+            udp_client.sendto(message_raw, ip)
 
     for worker in active_connections:
         worker.join()
@@ -131,15 +143,47 @@ def link_layer_broadcast_listener():
     while True:
         message = server_socket.recv(10240)
 
+        message_decoded = pickle.loads(message)
+        if message_decoded.type == "DATA":
+            print("BROADCAST listener GOT this: ", message_decoded)
+            continue
         server_message_queue.put(message)
+
 
     worker_thread.join()
 
 
-def worker_data_listener(client_socket, addr):
+def worker_data_sender(client_socket, addr):
+    # something is wrong here. What has to be done is that there has to be an another thread that
+    # listens the client socket at the other end.
+    local_terminate_flag = False
     while True:
         message_raw = ip_address_to_tcp_queue[addr].get()
-        client_socket.send(message_raw)
+        print("sending data over tcp", pickle.loads(message_raw))
+        try:
+            client_socket.send(message_raw)
+        except ConnectionError:
+            local_terminate_flag = True
+
+        if close_tcp_connections or local_terminate_flag:
+            client_socket.close()
+            del ip_address_to_tcp_queue[addr]
+            break
+
+
+def worker_data_receiver(client_socket, addr):
+    local_terminate_flag = False
+    while True:
+        try:
+            message_raw = client_socket.recv(1024)
+            server_message_queue.put(message_raw)
+        except ConnectionError:
+            local_terminate_flag = True
+
+        if close_tcp_connections or local_terminate_flag:
+            client_socket.close()
+            del ip_address_to_tcp_queue[addr]
+            break
 
 
 def link_layer_data_listener():
@@ -152,7 +196,9 @@ def link_layer_data_listener():
     while True:
         connection_socket, addr = server_socket.accept()
         ip_address_to_tcp_queue[addr[0]] = queue.Queue()
-        active_connection_list.append(threading.Thread(target=worker_data_listener, args=(connection_socket, addr[0],)))
+        active_connection_list.append(threading.Thread(target=worker_data_sender, args=(connection_socket, addr[0],)))
+        active_connection_list[-1].start()
+        active_connection_list.append(threading.Thread(target=worker_data_receiver, args=(connection_socket, addr[0],)))
         active_connection_list[-1].start()
 
     for connection in active_connection_list:
@@ -204,9 +250,9 @@ if __name__ == "__main__":
 
     read_config_file("config.ini", sys.argv[1])
 
+    link_layer_data_listener_thread = threading.Thread(target=link_layer_data_listener, args=())
     link_layer_server_thread = threading.Thread(target=link_layer_broadcast_listener, args=())
     network_layer_listener_thread = threading.Thread(target=network_layer_listener, args=())
-    link_layer_data_listener_thread = threading.Thread(target=link_layer_data_listener, args=())
 
     link_layer_server_thread.start()
     network_layer_listener_thread.start()
