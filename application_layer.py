@@ -24,6 +24,15 @@ network_layer_queue = queue.Queue()
 
 election_queue = queue.Queue()
 
+topology_table = {}
+
+bully_wait_time = 3
+
+bully_dict = {"ack": {"sent": [], "received": []},
+              "elect": {"sent": [], "received": []},
+              "grant": {"sent": [], "received": []},
+              "victory": {"sent": [], "received": []}}
+
 
 def startElection(name):
     election_queue.put("start " + name)
@@ -36,15 +45,15 @@ def elect():
     elif message == "start aefa":
         aefa("", True)
 
-    elif message.elec_type == "BULLY":
+    elif message.type[0] == "BULLY":
         bully(message, False)
-    elif message.elec_type == "AEFA":
+    elif message.type[0] == "AEFA":
         aefa(message, False)
 
 
 def bully(first_message, start):
     if start:
-        pass  # send first election message
+        bully_start()
     else:
         bully_process_message(first_message)
     while True:
@@ -52,8 +61,41 @@ def bully(first_message, start):
         bully_process_message(election_message)
 
 
+def bully_start():
+    for node_name in topology_table:
+        if node_name > name_self:
+            bully_send("elect", node_name)
+
+
+def bully_send(message_type, destination):
+    packet_to_send = packet(["BULLY", message_type.capitalize()], "", "", "", {}, destination, "", "", "", time.time(),
+                            0)
+    bully_dict[message_type]["sent"].append(destination)
+    network_layer_queue.put(pickle.dumps(packet_to_send))
+
+
 def bully_process_message(message):
-    pass
+    message_source = message.source
+    if message.type[1] == "ELECT":
+        bully_dict["elect"]["received"].append(message_source)
+        bully_send("ack", message_source)
+    elif message.type[1] == "ACK":
+        bully_dict["ack"]["received"].append(message_source)
+        if len(bully_dict["ack"]["received"]) == len(bully_dict["elect"]["sent"]):
+            winner = max(bully_dict["ack"]["received"])
+            bully_send("grant", winner)
+        else:
+            pass  # TODO add a timer to check ack timeout
+
+    elif message.type[1] == "GRANT":
+        print("This node is selected LEADER")
+        for node_name in topology_table:
+            if node_name != name_self:
+                bully_send("victory", node_name)
+    elif message.type[1] == "VICTORY":
+        print("Node {} is the leader".format(message_source))
+    else:
+        print("something wrong with bully message")
 
 
 def aefa(first_message, start):
