@@ -35,6 +35,8 @@ number_of_scopes = 2
 
 link_layer_message_queue = queue.Queue()  # queue holds messages in original format.
 
+application_layer_message_queue = queue.Queue()
+
 link_layer_up_stream_address = "tcp://127.0.0.1:5554"  # link layer address
 
 network_layer_up_stream_address = "tcp://127.0.0.1:5555"  # network layer up stream
@@ -51,7 +53,7 @@ name_self = ""
 
 position_self = None
 
-link_layer_port_number = None
+link_layer_broadcast_port_number = None
 
 topology_table_changed = False
 
@@ -61,10 +63,19 @@ broadcast_address = None
 
 communication_range = None
 
+'''
+todo list:
+    * Leader election algorithm: 
+      https://ieeexplore.ieee.org/stamp/stamp.jsp?tp=&arnumber=1348124
+      To perform this paper we need to attain values to every node in the system.
+      We might need to support movements, or dynamic changes probably.
+        * on a dynamic change, we need to tear up the tcp connections to already established ones.
+        * Moreover, we need to the accept the latest routing information in the periodic updates as the routing table
+          will change dynamically.
+      We need new type of message. Probably [elect].
+   
+'''
 
-# here define rooting algorithm
-
-# here we need atomic data structure for rooting algorithm
 
 def node_init():
     global topology_table
@@ -96,6 +107,8 @@ def find_shortest_path():
     topology_table_mutex.acquire()
     global routing_table
     global topology_table_changed
+
+    # print("TOPOLOGY IN SHORTEST: ", topology_table)
 
     # dijkstra shortest-path algorithm
     routing_table[name_self] = {"dest_addr": ip_address_self, "next_hop": ip_address_self, "distance": 0}
@@ -145,6 +158,7 @@ def process_packet(message):
     global sequence
 
     topology_table_changed = False
+    neighbor_list_changed = False
 
     source = message.source
     name = message.name
@@ -159,10 +173,12 @@ def process_packet(message):
         topology_table[name]["position"] = position
         topology_table[name]["sequence_number"] += 1
         topology_table_changed = True
+        neighbor_list_changed = True
     else:
         print("\n (Network Layer) New neighbor added: ", name, flush=True)
         topology_table[name_self]["neighbor_list"].append(name)
         topology_table_changed = True
+        neighbor_list_changed = True
 
     for dest_in_packet in packet_link_state:
         if dest_in_packet not in topology_table:
@@ -180,8 +196,18 @@ def process_packet(message):
             if len(topology_table[dest_in_packet]["neighbor_list"]) < len(
                     packet_link_state[dest_in_packet]["neighbor_list"]):
                 topology_table[dest_in_packet] = packet_link_state[dest_in_packet]
+                topology_table_changed = True
         if dest_in_packet == name:
             topology_table[dest_in_packet]["sequence_number"] += 1
+
+    if neighbor_list_changed:
+        # TODO: only the neighbor list should be directed to the application layer.
+        # TODO inform application layer that topology table has changed
+        # TODO: provide neighbor list to the application layer.
+        message = packet("neighbor", ip_address_self, name_self, sequence,
+                         {name_self: topology_table[name_self]["neighbor_list"]},
+                         broadcast_address, "", position_self, "", time.time(), 0)
+        application_layer_message_queue.put(pickle.dumps(message))
 
     topology_table_mutex.release()
 
@@ -216,7 +242,7 @@ def periodic_routing_update():
 
     # I have added necessary parts roughly. We can check both the packet type and structural design tomorrow.
     while True:
-        time.sleep(scope_interval[0] / 1600)
+        time.sleep(scope_interval[0] / 1000)
 
         current_time = time.time()
 
@@ -303,9 +329,6 @@ def link_layer_listener():
     server_socket.bind(network_layer_down_stream_address)
     server_socket.setsockopt(zmq.LINGER, 0)
 
-    client_socket = context.socket(zmq.PUSH)
-    client_socket.connect(application_layer_address)
-
     while True:
         message_raw = server_socket.recv()
         message = pickle.loads(message_raw)
@@ -313,10 +336,19 @@ def link_layer_listener():
         if _is_control_message(message.type):
             update_routing_table(message)
         elif _is_destination_self(message.destination):
-            client_socket.send(message_raw)
+            application_layer_message_queue.put(message_raw)
         else:
-            message = message._replace(position=position_self, hop_count = message.hop_count + 1)
+            message = message._replace(position=position_self, hop_count=message.hop_count + 1)
             link_layer_message_queue.put(message)
+
+
+def app_layer_informer():
+    client_socket = context.socket(zmq.PUSH)
+    client_socket.connect(application_layer_address)
+
+    while True:
+        message_raw = application_layer_message_queue.get()
+        client_socket.send(message_raw)
 
 
 def app_layer_listener():
@@ -350,7 +382,7 @@ def link_layer_client():
 
 def read_config_file(filename, name):
     global ip_address_self, name_self, position_self, scope_interval
-    global number_of_scopes, port_number_self, link_layer_port_number
+    global number_of_scopes, port_number_self, link_layer_broadcast_port_number
     global max_last_heard_time
     global scope_clocks, broadcast_address
     global network_layer_down_stream_address, network_layer_up_stream_address
@@ -372,7 +404,7 @@ def read_config_file(filename, name):
     link_layer_up_stream_address = node_settings["link_layer_up_stream_address"]
 
     ip_address_self = node_settings["ip"]
-    link_layer_port_number = int(default_settings["link_layer_port_number"])
+    link_layer_port_number = int(default_settings["link_layer_broadcast_port_number"])
 
     ip_address_self = (ip_address_self, link_layer_port_number)
     broadcast_address = (default_settings["broadcast_address"], link_layer_port_number)
@@ -411,16 +443,19 @@ if __name__ == "__main__":
     signal.signal(signal.SIGINT, signal_handler)
 
     network_layer_up_thread = threading.Thread(target=app_layer_listener, args=())
+    network_layer_informer_thread = threading.Thread(target=app_layer_informer, args=())
     network_layer_down_thread = threading.Thread(target=link_layer_listener, args=())
     link_layer_client_thread = threading.Thread(target=link_layer_client, args=())
     periodic_update_thread = threading.Thread(target=periodic_routing_update, args=())
 
     network_layer_up_thread.start()
+    network_layer_informer_thread.start()
     network_layer_down_thread.start()
     link_layer_client_thread.start()
     periodic_update_thread.start()
 
     network_layer_down_thread.join()
+    network_layer_informer_thread.join()
     network_layer_up_thread.join()
     link_layer_client_thread.join()
     periodic_update_thread.join()

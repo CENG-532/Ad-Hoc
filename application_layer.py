@@ -85,6 +85,9 @@ if __name__ == "__main__":
         received_message = server_socket.recv()
         # process received message here
         message = pickle.loads(received_message)
+        # todo here we need to check the type of the message.
+        if message.type in ["neighbor", "election", "ack", "leader"]:
+            print(message)
         elapsed_time = time.time() - message.timestamp
         print("\n (Application Layer) message \"%s\" received from %s within %f seconds in %d hops" %
               (message.message, message.name, elapsed_time, message.hop_count + 1), flush=True)

@@ -6,7 +6,7 @@
     $ ssh -X mininet@<eth0-inet addr>
 
 3) Run the topology:
-    $ sudo mn --custom topology.py --topo mytopo --mac
+    $ sudo mn --custom topology.py --topo mytopo --mac --link tc
 
 There are 5 nodes in the topology named:
  -nodeA
