@@ -22,6 +22,53 @@ time_file = None
 
 network_layer_queue = queue.Queue()
 
+election_queue = queue.Queue()
+
+
+def startElection(name):
+    election_queue.put("start " + name)
+
+
+def elect():
+    message = election_queue.get()
+    if message == "start bully":
+        bully("", True)
+    elif message == "start aefa":
+        aefa("", True)
+
+    elif message.elec_type == "BULLY":
+        bully(message, False)
+    elif message.elec_type == "AEFA":
+        aefa(message, False)
+
+
+def bully(first_message, start):
+    if start:
+        pass  # send first election message
+    else:
+        bully_process_message(first_message)
+    while True:
+        election_message = election_queue.get()
+        bully_process_message(election_message)
+
+
+def bully_process_message(message):
+    pass
+
+
+def aefa(first_message, start):
+    if start:
+        pass  # send first election message
+    else:
+        aefa_process_message(first_message)
+    while True:
+        election_message = election_queue.get()
+        aefa_process_message(election_message)
+
+
+def aefa_process_message(message):
+    pass
+
 
 def get_message_to_send():
     # get a message from user and send it
