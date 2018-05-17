@@ -11,7 +11,7 @@ import signal
 from math import sqrt, pow
 from collections import namedtuple
 
-# have MAC layout to match ip to mac or use IP right away.
+# backup
 
 server_message_queue = queue.Queue()  # queue holds raw values of messages in byte format.
 
