@@ -5,6 +5,7 @@ import signal
 import sys
 import configparser
 import time
+import election_algorithms
 
 from collections import namedtuple
 
