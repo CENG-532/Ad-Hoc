@@ -170,10 +170,10 @@ def process_packet(message):
     topology_table_mutex.acquire()
 
     if name in topology_table[name_self]["neighbor_list"]:
-        topology_table[name]["position"] = position
         topology_table[name]["sequence_number"] += 1
-        topology_table_changed = True
-        neighbor_list_changed = True
+        if topology_table[name]["position"] != position:
+            topology_table_changed = True
+            neighbor_list_changed = True
     else:
         print("\n (Network Layer) New neighbor added: ", name, flush=True)
         topology_table[name_self]["neighbor_list"].append(name)
@@ -206,6 +206,12 @@ def process_packet(message):
         # TODO: provide neighbor list to the application layer.
         message = packet("neighbor", ip_address_self, name_self, sequence,
                          {name_self: topology_table[name_self]["neighbor_list"]},
+                         broadcast_address, "", position_self, "", time.time(), 0)
+        application_layer_message_queue.put(pickle.dumps(message))
+
+    if topology_table_changed:
+        message = packet("topology", ip_address_self, name_self, sequence,
+                         {name_self: topology_table},
                          broadcast_address, "", position_self, "", time.time(), 0)
         application_layer_message_queue.put(pickle.dumps(message))
 
