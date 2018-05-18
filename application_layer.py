@@ -46,9 +46,9 @@ def elect():
     elif message == "start aefa":
         aefa("", True)
 
-    elif message.elec_type == "BULLY":
+    elif message.type[0] == "BULLY":
         bully(message, False)
-    elif message.elec_type == "AEFA":
+    elif message.type[0] == "AEFA":
         aefa(message, False)
 
 
@@ -72,7 +72,6 @@ def aefa(first_message, start):
             message = aefa_generate_message("ELECTION", neighbor)
             neighbor_list_acknowledges[neighbor] = False
             network_layer_queue.put(pickle.dumps(message))
-        pass  # send first election message
     else:
         aefa_process_message(first_message)
     while True:
@@ -145,15 +144,19 @@ def get_message_to_send():
     # get a message from user and send it
     # commit
     while True:
-        command = input("command (auto or manual): ")
+        command = input("command (auto or manual or elect): ")
         if command == "auto":
             get_messages_from_file()
-        else:
+        elif command == "manual":
             message = input("message: ")
             destination = input("destination: ")
 
             packet_to_send = packet("DATA", "", "", "", {}, destination, "", "", message, time.time(), 0)
             network_layer_queue.put(pickle.dumps(packet_to_send))
+        else:
+            commands = command.split()
+            if commands[0] == "elect":
+                start_election(commands[1])
 
 
 def get_messages_from_file():
@@ -210,13 +213,14 @@ def network_layer_listener():
         message = pickle.loads(received_message)
         # todo here we need to check the type of the message.
         if message.type != "DATA":
+            print(message)
             if message.type == "neighbor":
                 neighbor_list = message.link_state[name_self]
+                print("neighbor list: ", neighbor_list)
             elif message.type == "topology":
                 topology_table = message.link_state[name_self]
             else:
                 election_queue.put(message)
-            print(message)
         elapsed_time = time.time() - message.timestamp
         print("\n (Application Layer) message \"%s\" received from %s within %f seconds in %d hops" %
               (message.message, message.name, elapsed_time, message.hop_count + 1), flush=True)
@@ -230,14 +234,17 @@ if __name__ == "__main__":
 
     read_config_file("config.ini", sys.argv[1])
 
+    election_thread = threading.Thread(target=elect, args=())
     prompt_thread = threading.Thread(target=get_message_to_send, args=())
     network_layer_informer_thread = threading.Thread(target=network_layer_informer, args=())
     network_layer_listener_thread = threading.Thread(target=network_layer_listener, args=())
 
+    election_thread.start()
     prompt_thread.start()
     network_layer_informer_thread.start()
     network_layer_listener_thread.start()
 
+    election_thread.join()
     prompt_thread.join()
     network_layer_informer_thread.join()
     network_layer_listener_thread.join()
