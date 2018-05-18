@@ -71,7 +71,9 @@ def worker_network_layer_informer(context):
     while True:
         message_raw = server_message_queue.get()
         message = pickle.loads(message_raw)
-
+        # if message.type != "broadcast" and message.type != "update":
+        #     print("forwarding to the network layer: ", message)
+        #     client_socket.send(message_raw)
         if is_in_range(message.position) and message.name != name_self:
             # print("message is loaded:", message)
             client_socket.send(message_raw)
@@ -97,15 +99,20 @@ def network_layer_listener():
             continue
         if ip[0] != broadcast_address:
             # here put the datagram to the queue of tcp connection
-            print("this message is being sent", message)
+            # print("this message is being sent", message)
             try:
                 ip_address_to_tcp_queue[ip[0]].put(message_raw)
             except KeyError:
                 # todo: you need to connect to the destination.
-                try:
                     tcp_client_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
                     print("connecting to the ip:{} [{}]".format(ip[0], link_layer_data_port_number))
-                    tcp_client_socket.connect((ip[0], link_layer_data_port_number))
+                    while True:
+                        try:
+                            tcp_client_socket.connect((ip[0], link_layer_data_port_number))
+                            break
+                        except OSError:
+                            print("got OSerror")
+                            continue
                     active_connections.append(threading.Thread(target=worker_data_sender,
                                                                args=(tcp_client_socket, ip[0],)))
                     ip_address_to_tcp_queue[ip[0]] = queue.Queue()
@@ -114,9 +121,7 @@ def network_layer_listener():
                     active_connections.append(threading.Thread(target=worker_data_receiver,
                                                                args=(tcp_client_socket, ip[0],)))
                     active_connections[-1].start()
-                except OSError:
-                    print("got OSerror")
-                    continue
+
 
         # since we only care about ip address of the message to be sent, there is no need to check for extra stuff here.
         # print(message)
@@ -159,10 +164,11 @@ def worker_data_sender(client_socket, addr):
     local_terminate_flag = False
     while True:
         message_raw = ip_address_to_tcp_queue[addr].get()
-        print("sending data over tcp", pickle.loads(message_raw))
+        print("sending data over tcp", pickle.loads(message_raw), flush=True)
         try:
             client_socket.send(message_raw)
         except ConnectionError:
+            print("caught connection error, terminating connection", flush=True)
             local_terminate_flag = True
 
         if close_tcp_connections or local_terminate_flag:
@@ -176,8 +182,10 @@ def worker_data_receiver(client_socket, addr):
     while True:
         try:
             message_raw = client_socket.recv(1024)
+            print("this message is received over tcp:", pickle.loads(message_raw), flush=True)
             server_message_queue.put(message_raw)
         except ConnectionError:
+            print("caught connection error, terminating connection", flush=True)
             local_terminate_flag = True
 
         if close_tcp_connections or local_terminate_flag:

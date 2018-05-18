@@ -381,7 +381,7 @@ def link_layer_client():
 
         if not _is_control_message(message.type):
             message = message._replace(next_hop=find_routing(message.destination))
-            print("\n (Network Layer) message \"%s\" forwarded from %s to %s" % (message.message, message.source, message.next_hop), flush=True)
+            # print("\n (Network Layer) message \"%s\" forwarded from %s to %s" % (message.message, message.source, message.next_hop), flush=True)
 
         client_socket.send(pickle.dumps(message))
 

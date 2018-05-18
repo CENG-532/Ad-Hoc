@@ -42,6 +42,8 @@ parent_node = None
 
 candidate_leader = None
 
+election_finished = False
+
 
 def start_election(name):
     election_queue.put("start " + name)
@@ -49,6 +51,11 @@ def start_election(name):
 
 def elect():
     message = election_queue.get()
+    print("election function message: ", message)
+    try:
+        print("election type : ", message.type[0], message.type[1])
+    except Exception:
+        pass
     if message == "start bully":
         bully("", True)
     elif message == "start aefa":
@@ -57,6 +64,7 @@ def elect():
     elif message.type[0] == "BULLY":
         bully(message, False)
     elif message.type[0] == "AEFA":
+        print("message_Type: ", message.type)
         aefa(message, False)
 
 
@@ -108,31 +116,39 @@ def bully_process_message(message):
 
 
 def aefa(first_message, start):
+    global parent_node
     if start:
         for neighbor in neighbor_list:
             message = aefa_generate_message("ELECTION", neighbor)
             neighbor_list_acknowledges[neighbor] = False
             network_layer_queue.put(pickle.dumps(message))
+            parent_node = name_self
     else:
         aefa_process_message(first_message)
+
     while True:
         election_message = election_queue.get()
         aefa_process_message(election_message)
+        if election_finished:
+            print("election finished", flush=True)
+            break
 
 
 def aefa_process_message(message):
-    global parent_node, candidate_leader
+    global parent_node, candidate_leader, election_finished
     # todo: if received an election packet, send it to the neighbors but not to the parent
     # todo: until all the neighbors returned ACK message back, wait.
     # todo: if there is no neighbor to send the packet except the parent, then return ACK message
     # todo: when all neighbors/children sent back ACK message to the parent, return ACK message
     # todo: if parent is null, then it means it is the one that initiated the ELECTION.
     # todo: once initiator received ACK messages, inform all the nodes about LEADER
-    message_type = message.type
+    message_type = message.type[1]
+    print("$$$$$$This message is received: {} $$$$$$".format(message), flush=True)
     if message_type == "ELECTION":
         # todo: can we support asynchronous election?
         # todo: what if we continue with the election that has been started by the min/max identifier.
-        parent_node = message.source
+        if not parent_node:
+            parent_node = message.name
         # check for the neighbors.
         message_sent = False
         for neighbor in neighbor_list:
@@ -146,34 +162,41 @@ def aefa_process_message(message):
             # no neighbor to inform about election.
             # todo: return ACK message back to parent. if no parent exist, you are the only one in the network.
             # todo: declare yourself as leader.
-            if parent_node:
+            if parent_node != name_self:
                 message_to_send = aefa_generate_message("ACK", parent_node)
                 network_layer_queue.put(pickle.dumps(message_to_send))
     elif message_type == "ACK":
         # todo: check whether all neighbors returned ACK or not.
         # todo: if so, return ACK to the parent.
         # todo: if there is no parent, then declare the leader.
-        neighbor_list_acknowledges[message.source] = True
+        neighbor_list_acknowledges[message.name] = True
         received_all_acks = True
-        candidate_leader = message.source if message.source > candidate_leader else candidate_leader
+        candidate_leader = message.name if message.name > candidate_leader else candidate_leader
         for neighbor in neighbor_list_acknowledges:
             received_all_acks = received_all_acks and neighbor_list_acknowledges[neighbor]
 
         if received_all_acks:
-            if parent_node:
+            if parent_node != name_self:
                 message_to_send = aefa_generate_message("ACK", parent_node, candidate_leader)
                 network_layer_queue.put(pickle.dumps(message_to_send))
             else:
                 # todo: you are the one that initiated the connection. Broadcast the LEADER messages.
-                for node in topology_table:
-                    message_to_send = aefa_generate_message("LEADER", node, candidate_leader)
-                    network_layer_queue.put(pickle.dumps(message_to_send))
+                for node in neighbor_list:
+                    if node != name_self:
+                        message_to_send = aefa_generate_message("LEADER", node, candidate_leader)
+                        network_layer_queue.put(pickle.dumps(message_to_send))
     elif message_type == "LEADER":
         # todo: leader message is received. now you can measure the time.
         # todo: terminate if you want to. this is the end of the algorithm.
         # todo: flood leader packets just like ack packages.
-        print("leader is : {}".format(message.message))
-    pass
+        candidate_leader = message.message
+        for node in neighbor_list:
+            if node != parent_node:
+                message_to_send = aefa_generate_message("LEADER", node, candidate_leader)
+                network_layer_queue.put(pickle.dumps(message_to_send))
+
+        print("########LEADER######## is : {}".format(message.message), flush=True)
+        # election_finished = True
 
 
 def aefa_generate_message(message_type, destination, message_info=""):
@@ -254,7 +277,7 @@ def network_layer_listener():
         message = pickle.loads(received_message)
         # todo here we need to check the type of the message.
         if message.type != "DATA":
-            print(message)
+            # print(message)
             if message.type == "neighbor":
                 neighbor_list = message.link_state[name_self]
                 print("neighbor list: ", neighbor_list)
@@ -263,8 +286,8 @@ def network_layer_listener():
             else:
                 election_queue.put(message)
         elapsed_time = time.time() - message.timestamp
-        print("\n (Application Layer) message \"%s\" received from %s within %f seconds in %d hops" %
-              (message.message, message.name, elapsed_time, message.hop_count + 1), flush=True)
+        # print("\n (Application Layer) message \"%s\" received from %s within %f seconds in %d hops" %
+        #       (message.message, message.name, elapsed_time, message.hop_count + 1), flush=True)
         time_file.write("%s %d %f\r\n" % (message.name, message.hop_count + 1, elapsed_time))
         # break on some condition
 
