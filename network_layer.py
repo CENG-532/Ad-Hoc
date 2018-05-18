@@ -342,6 +342,7 @@ def link_layer_listener():
         if _is_control_message(message.type):
             update_routing_table(message)
         elif _is_destination_self(message.destination):
+            print("N->A", pickle.loads(message_raw))
             application_layer_message_queue.put(message_raw)
         else:
             message = message._replace(position=position_self, hop_count=message.hop_count + 1)
@@ -370,6 +371,7 @@ def app_layer_listener():
 
         message = pickle.loads(message_raw)
         message = message._replace(position=position_self, source=ip_address_self, name=name_self, sequence=sequence)
+        print("N->L", message)
         link_layer_message_queue.put(message)
 
 

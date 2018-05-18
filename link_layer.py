@@ -104,23 +104,20 @@ def network_layer_listener():
                 ip_address_to_tcp_queue[ip[0]].put(message_raw)
             except KeyError:
                 # todo: you need to connect to the destination.
-                    tcp_client_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-                    print("connecting to the ip:{} [{}]".format(ip[0], link_layer_data_port_number))
-                    while True:
-                        try:
-                            tcp_client_socket.connect((ip[0], link_layer_data_port_number))
-                            break
-                        except OSError:
-                            print("got OSerror")
-                            continue
-                    active_connections.append(threading.Thread(target=worker_data_sender,
-                                                               args=(tcp_client_socket, ip[0],)))
-                    ip_address_to_tcp_queue[ip[0]] = queue.Queue()
-                    ip_address_to_tcp_queue[ip[0]].put(message_raw)
-                    active_connections[-1].start()
-                    active_connections.append(threading.Thread(target=worker_data_receiver,
-                                                               args=(tcp_client_socket, ip[0],)))
-                    active_connections[-1].start()
+                client_socket = context.socket(zmq.PUSH)
+                print("connecting to the ip:{} [{}]".format(ip[0], link_layer_data_port_number))
+                while True:
+                    try:
+                        client_socket.connect("tcp://" + ip[0] + ":" + str(link_layer_data_port_number))
+                        break
+                    except OSError:
+                        print("got OSerror")
+                        continue
+                active_connections.append(threading.Thread(target=worker_data_sender,
+                                                           args=(client_socket, ip[0],)))
+                ip_address_to_tcp_queue[ip[0]] = queue.Queue()
+                ip_address_to_tcp_queue[ip[0]].put(message_raw)
+                active_connections[-1].start()
 
 
         # since we only care about ip address of the message to be sent, there is no need to check for extra stuff here.
@@ -162,10 +159,12 @@ def worker_data_sender(client_socket, addr):
     # something is wrong here. What has to be done is that there has to be an another thread that
     # listens the client socket at the other end.
     local_terminate_flag = False
+    active_connection_list = []
     while True:
         message_raw = ip_address_to_tcp_queue[addr].get()
-        print("sending data over tcp", pickle.loads(message_raw), flush=True)
+        # print("sending data over tcp", pickle.loads(message_raw), flush=True)
         try:
+            # print("L->L", pickle.loads(message_raw))
             client_socket.send(message_raw)
         except ConnectionError:
             print("caught connection error, terminating connection", flush=True)
@@ -182,7 +181,7 @@ def worker_data_receiver(client_socket, addr):
     while True:
         try:
             message_raw = client_socket.recv(1024)
-            print("this message is received over tcp:", pickle.loads(message_raw), flush=True)
+            # print("this message is received over tcp:", pickle.loads(message_raw), flush=True)
             server_message_queue.put(message_raw)
         except ConnectionError:
             print("caught connection error, terminating connection", flush=True)
@@ -196,21 +195,16 @@ def worker_data_receiver(client_socket, addr):
 
 def link_layer_data_listener():
     # this will listen tcp
-    server_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-    server_socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-    server_socket.bind(("0.0.0.0", link_layer_data_port_number))
-    server_socket.listen(10)
-    active_connection_list = []
+    # todo asd
+    server_socket = context.socket(zmq.PULL)
+    server_socket.bind("tcp://" + "0.0.0.0" + ":" + str(link_layer_data_port_number))
+    server_socket.setsockopt(zmq.LINGER, 0)
     while True:
-        connection_socket, addr = server_socket.accept()
-        ip_address_to_tcp_queue[addr[0]] = queue.Queue()
-        active_connection_list.append(threading.Thread(target=worker_data_sender, args=(connection_socket, addr[0],)))
-        active_connection_list[-1].start()
-        active_connection_list.append(threading.Thread(target=worker_data_receiver, args=(connection_socket, addr[0],)))
-        active_connection_list[-1].start()
+        message_raw = server_socket.recv()
+        server_message_queue.put(message_raw)
 
-    for connection in active_connection_list:
-        connection.join()
+    # for connection in active_connection_list:
+    #     connection.join()
 
 
 def read_config_file(filename, name):
