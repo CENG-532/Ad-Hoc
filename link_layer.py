@@ -80,6 +80,7 @@ def worker_network_layer_informer(context):
 
 
 def network_layer_listener():
+    global ip_address_to_tcp_queue
     # print("network layer listener is started")
     server_socket = context.socket(zmq.PULL)
     server_socket.bind(link_layer_up_stream_address)

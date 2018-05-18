@@ -35,7 +35,7 @@ class MyTopo(Topo):
         switch1 = self.addSwitch('s1')
 
         # Add links
-        linkopts = dict(loss=5)
+        linkopts = dict(loss=15)
 
         self.addLink(host1, switch1, **linkopts)
         self.addLink(host2, switch1, **linkopts)

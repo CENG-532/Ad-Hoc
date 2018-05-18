@@ -149,7 +149,14 @@ def bully_reset():
 
 
 def aefa_reset():
-    pass  # TODO reset all variables
+    global neighbor_list_acknowledges, parent_node, candidate_leader, election_requester, election_queue
+    global election_finished
+    election_finished = False
+    neighbor_list_acknowledges = {}
+    parent_node = None
+    candidate_leader = name_self
+    election_requester = None
+    election_queue = queue.Queue()
 
 
 def aefa(first_message, start):
@@ -170,7 +177,7 @@ def aefa(first_message, start):
         aefa_process_message(election_message)
         if election_finished:
             print("election finished", flush=True)
-            break
+            elect()
 
 
 def aefa_process_message(message):
@@ -182,30 +189,29 @@ def aefa_process_message(message):
     # if parent is null, then it means it is the one that initiated the ELECTION.
     # once initiator received ACK messages, inform all the nodes about LEADER
     message_type = message.type[1]
+    message_headers = message.message.split()  # 0 -> requester, 1 -> candidate
+
     print("$$$$$$This message is received: {} $$$$$$".format(message), flush=True)
     if message_type == "ELECTION":
         if not election_requester:
-            election_requester = message.message
+            election_requester = message_headers[0]
         else:
-            if election_requester < message.message:
+            if election_requester < message_headers[0]:
                 # todo: need to inform that election requester in the message should stop its election
                 # message format: type=[STOP] message="[WRONG_REQUESTER] [CORRECT_REQUESTER]"
-                message_to_send = aefa_generate_message("STOP", message.name, message.message + " " + election_requester)
+                message_to_send = aefa_generate_message("STOP", message.name,
+                                                        message_headers[0] + " " + election_requester)
                 network_layer_queue.put(pickle.dumps(message_to_send))
-            elif election_requester > message.message:
-                print("ANOTHER ELECTION [{}] is going on. STOPPING CURRENT [{}]!".format(message.message,
+            elif election_requester > message_headers[0]:
+                print("ANOTHER ELECTION [{}] is going on. STOPPING CURRENT [{}]!".format(message_headers[0],
                                                                                          election_requester))
                 # the identifier of other election requester is better, this node needs to stop its own election
                 previous_election_requester = election_requester
-                election_requester = message.message
-                for neighbor in neighbor_list_acknowledges:
+                election_requester = message_headers[0]
+                for neighbor in neighbor_list:
                     message_to_send = aefa_generate_message("STOP", neighbor,
                                                             previous_election_requester + " " + election_requester)
                     network_layer_queue.put(pickle.dumps(message_to_send))
-
-                message_to_send = aefa_generate_message("STOP", parent_node,
-                                                        previous_election_requester + " " + election_requester)
-                network_layer_queue.put(pickle.dumps(message_to_send))
 
                 parent_node = message.name
 
@@ -218,45 +224,58 @@ def aefa_process_message(message):
         # check for the neighbors.
 
     elif message_type == "ACK":
+        if message_headers[0] != election_requester:
+            # here we return because, ACK messages come from the wrong selection
+            return
+
+        if neighbor_list_acknowledges[message.name]:
+            # duplicate ack messages
+            return
+
         neighbor_list_acknowledges[message.name] = True
         received_all_acks = True
-        candidate_leader = message.message if message.message > candidate_leader else candidate_leader
+        candidate_leader = message_headers[1] if message_headers[1] > candidate_leader else candidate_leader
+
         for neighbor in neighbor_list_acknowledges:
             received_all_acks = received_all_acks and neighbor_list_acknowledges[neighbor]
 
         if received_all_acks:
             if parent_node != name_self:
-                message_to_send = aefa_generate_message("ACK", parent_node, candidate_leader)
+                message_to_send = aefa_generate_message("ACK", parent_node, election_requester + " " + candidate_leader)
                 network_layer_queue.put(pickle.dumps(message_to_send))
             else:
                 print("Leader is selected: ", candidate_leader)
                 for node in neighbor_list:
                     if node != name_self:
-                        message_to_send = aefa_generate_message("LEADER", node, candidate_leader)
+                        message_to_send = aefa_generate_message("LEADER", node,
+                                                                election_requester + " " + candidate_leader)
                         network_layer_queue.put(pickle.dumps(message_to_send))
+                election_finished = True
     elif message_type == "LEADER":
         # leader message is received. now you can measure the time.
         # flood leader packets just like ack packages.
-        candidate_leader = message.message
+
+        candidate_leader = message_headers[1]
         for node in neighbor_list:
             if node != parent_node:
-                message_to_send = aefa_generate_message("LEADER", node, candidate_leader)
+                message_to_send = aefa_generate_message("LEADER", node, election_requester + " " + candidate_leader)
                 network_layer_queue.put(pickle.dumps(message_to_send))
 
-        print("########LEADER######## is : {}".format(message.message), flush=True)
-        # election_finished = True
+        print("########LEADER######## is : {}".format(candidate_leader), flush=True)
+        election_finished = True
+
     elif message_type == "STOP":
         # message format = [previous requester] [new requester]
-        election_requester_data = message.message.split()
-        if election_requester == election_requester_data[1]:
+        election_requester_data = message_headers[1]
+        if election_requester == election_requester_data:
             # we are already in the same election, ignore the message.
             pass
-        elif election_requester > election_requester_data[1]:
-            print("ANOTHER ELECTION [{}] is going on. STOPPING CURRENT [{}]!".format(message.message,
+        elif election_requester > election_requester_data:
+            print("ANOTHER ELECTION [{}] is going on. STOPPING CURRENT [{}]!".format(message_headers[0],
                                                                                      election_requester))
             # we need to spread STOP message to our neighbors but the sender.
             previous_election_requester = election_requester
-            election_requester = election_requester_data[1]
+            election_requester = election_requester_data
             for neighbor in neighbor_list:
                 if neighbor != message.name:
                     message_to_send = aefa_generate_message("STOP", neighbor,
@@ -267,7 +286,7 @@ def aefa_process_message(message):
 
             parent_node = message.name
 
-            aefa_election_inform_neighbors()
+        # aefa_election_inform_neighbors()
 
         else:
             # the stop requester should stop.
@@ -290,7 +309,7 @@ def aefa_election_inform_neighbors():
         # return ACK message back to parent. if no parent exist, you are the only one in the network.
         # declare yourself as leader.
         if parent_node != name_self:
-            message_to_send = aefa_generate_message("ACK", parent_node, candidate_leader)
+            message_to_send = aefa_generate_message("ACK", parent_node, election_requester + " " + candidate_leader)
             network_layer_queue.put(pickle.dumps(message_to_send))
 
 
