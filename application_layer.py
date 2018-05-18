@@ -35,6 +35,7 @@ bully_dict = {"ack": {"sent": [], "received": []},
               "grant": {"sent": [], "received": []},
               "victory": {"sent": [], "received": []}}
 
+elect_start_time = 0
 
 neighbor_list_acknowledges = {}
 
@@ -50,12 +51,16 @@ def start_election(name):
 
 
 def elect():
+    global elect_start_time
+    bully_reset()
+    aefa_reset()
     message = election_queue.get()
     print("election function message: ", message)
     try:
         print("election type : ", message.type[0], message.type[1])
     except Exception:
         pass
+    elect_start_time = time.time()
     if message == "start bully":
         bully("", True)
     elif message == "start aefa":
@@ -81,38 +86,68 @@ def bully(first_message, start):
 def bully_start():
     for node_name in topology_table:
         if node_name > name_self:
+            # print("send elect message to {}".format(node_name))
             bully_send("elect", node_name)
 
 
 def bully_send(message_type, destination):
-    packet_to_send = packet(["BULLY", message_type.capitalize()], "", "", "", {}, destination, "", "", "", time.time(),
+    packet_to_send = packet(["BULLY", message_type.upper()], "", "", "", {}, destination, "", "", "", time.time(),
                             0)
     bully_dict[message_type]["sent"].append(destination)
     network_layer_queue.put(pickle.dumps(packet_to_send))
 
 
 def bully_process_message(message):
-    message_source = message.source
+    message_source = message.name
     if message.type[1] == "ELECT":
+        # print("got elect message from {}".format(message_source))
+        # if bully_dict["elect"]["received"]:
+        #     if min(bully_dict["elect"]["received"]) < message_source:
+        #         print("previous elect is smaller than this. Ignoring...")
+        #         return
         bully_dict["elect"]["received"].append(message_source)
         bully_send("ack", message_source)
     elif message.type[1] == "ACK":
+        # print("got ack message from {}".format(message_source))
         bully_dict["ack"]["received"].append(message_source)
         if len(bully_dict["ack"]["received"]) == len(bully_dict["elect"]["sent"]):
             winner = max(bully_dict["ack"]["received"])
+            # print("send grant message to {}".format(winner))
+            # if bully_dict["elect"]["received"]:
+            #     if min(bully_dict["elect"]["received"]) < message_source:
+            #         print("previous elect is smaller than this. Ignoring grant...")
+            #         return
+
             bully_send("grant", winner)
         else:
             pass  # TODO add a timer to check ack timeout
 
     elif message.type[1] == "GRANT":
-        print("This node is selected LEADER")
+        print("\n\nThis node is selected LEADER\n\n")
         for node_name in topology_table:
             if node_name != name_self:
+                print("send victory message to {}".format(node_name))
                 bully_send("victory", node_name)
+        elect()
     elif message.type[1] == "VICTORY":
-        print("Node {} is the leader".format(message_source))
+        print("\nleader is selected in {}\n".format(time.time() - elect_start_time))
+        print("\n{} is the leader\n".format(message_source))
+        elect()
     else:
-        print("something wrong with bully message")
+        print("something wrong with bully message:")
+        print(message)
+
+
+def bully_reset():
+    global bully_dict
+    bully_dict = {"ack": {"sent": [], "received": []},
+                  "elect": {"sent": [], "received": []},
+                  "grant": {"sent": [], "received": []},
+                  "victory": {"sent": [], "received": []}}
+
+
+def aefa_reset():
+    pass  # TODO reset all variables
 
 
 def aefa(first_message, start):
@@ -231,7 +266,6 @@ def get_messages_from_file():
         packet_to_send = packet("DATA", "", "", "", {}, destination, "", "", message, time.time(), 0)
         print("packet: ", packet_to_send)
         network_layer_queue.put(pickle.dumps(packet_to_send))
-        time.sleep(0.1)
     input_file.close()
     print("\nfinished sending messages from file")
 
@@ -260,6 +294,7 @@ def network_layer_informer():
     client_socket.connect(network_layer_up_stream_address)
     while True:
         message_raw = network_layer_queue.get()
+        print("A->N", pickle.loads(message_raw))
         client_socket.send(message_raw)
 
 
