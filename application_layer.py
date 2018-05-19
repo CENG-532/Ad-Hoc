@@ -160,7 +160,7 @@ def aefa_reset():
 
 
 def aefa(first_message, start):
-    global parent_node, election_requester
+    global parent_node, election_requester, elect_start_time
 
     if start:
         for neighbor in neighbor_list:
@@ -177,6 +177,7 @@ def aefa(first_message, start):
         aefa_process_message(election_message)
         if election_finished:
             print("election finished", flush=True)
+            print("TIME: ", time.time() - elect_start_time)
             elect()
 
 
@@ -294,7 +295,7 @@ def aefa_process_message(message):
 
 
 def aefa_election_inform_neighbors():
-    global election_requester, candidate_leader
+    global election_requester, candidate_leader, neighbor_list_acknowledges
     message_sent = False
     for neighbor in neighbor_list:
         if neighbor != parent_node:
