@@ -6,6 +6,8 @@ import sys
 import configparser
 import time
 import queue
+import subprocess
+import os
 
 from collections import namedtuple
 
@@ -210,6 +212,7 @@ def aefa(first_message, start):
                 existing_nodes[message.name] = True
 
         print("restarting election over again")
+        kill_on_finish()
 
     else:
         message_to_send = aefa_generate_message("FINISHED", election_requester)
@@ -424,6 +427,27 @@ def get_messages_from_file():
         network_layer_queue.put(pickle.dumps(packet_to_send))
     input_file.close()
     print("\nfinished sending messages from file")
+
+
+def kill_process_(node):
+    child_link_layer = int(
+        subprocess.check_output(["pgrep", '-f', "python3 link_layer.py " + node]).decode().split()[0])
+    child_network_layer = int(
+        subprocess.check_output(["pgrep", '-f', "python3 network_layer.py " + node]).decode().split()[0])
+    child_application_layer = int(
+        subprocess.check_output(["pgrep", '-f', "python3 application_layer.py " + node]).decode().split()[0])
+    print("result of communicate", child_link_layer, child_network_layer, child_application_layer)
+    os.kill(child_link_layer, signal.SIGTERM)
+    os.kill(child_network_layer, signal.SIGTERM)
+    os.kill(child_application_layer, signal.SIGTERM)
+
+
+def kill_on_finish():
+    for node in topology_table:
+        if node != name_self:
+            kill_process_(node)
+
+    kill_process_(name_self)
 
 
 def signal_handler(signal, frame):
