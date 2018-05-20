@@ -6,7 +6,6 @@ import sys
 import configparser
 import time
 import queue
-import election_algorithms
 
 from collections import namedtuple
 
@@ -51,6 +50,8 @@ election_algorithm = None
 election_count = None
 is_election_starter = None
 is_election_auto = None
+existing_nodes = {}  # dictionary [nodeName] -> [finished(boolean)]
+local_election_count = 0
 
 
 def start_election(name):
@@ -164,8 +165,22 @@ def aefa_reset():
     election_queue = queue.Queue()
 
 
+def all_nodes_finished():
+    global existing_nodes
+    finished = True
+
+    for node in existing_nodes:
+        finished = finished and existing_nodes[node]
+        if not finished:
+            return False
+
+    return True
+
+
 def aefa(first_message, start):
-    global parent_node, election_requester, elect_start_time
+    global parent_node, election_requester, elect_start_time, existing_nodes
+
+    elapsed_time = None
 
     if start:
         aefa_start()
@@ -178,8 +193,30 @@ def aefa(first_message, start):
         aefa_process_message(election_message)
         if election_finished:
             print("election finished", flush=True)
+            elapsed_time = time.time() - elect_start_time
             print("TIME: ", time.time() - elect_start_time)
             break
+
+    if name_self == election_requester:
+        for node in topology_table:
+            if node != name_self:
+                existing_nodes[node] = False
+
+        while not all_nodes_finished():
+            message = election_queue.get()
+            message_headers = message.type
+            if message_headers[1] == "FINISHED":
+                print("node: {} is finished".format(message.name))
+                existing_nodes[message.name] = True
+
+        print("restarting election over again")
+
+    else:
+        message_to_send = aefa_generate_message("FINISHED", election_requester)
+        network_layer_queue.put(pickle.dumps(message_to_send))
+
+    time_file.write("{:.4f}\n".format(elapsed_time))
+    print("elapsed time: {:.4f}".format(elapsed_time))
     elect()
 
 
@@ -390,9 +427,9 @@ def get_messages_from_file():
 
 
 def signal_handler(signal, frame):
+    time_file.close()
     context.term()
     context.destroy()
-    time_file.close()
     sys.exit()
 
 
@@ -430,6 +467,7 @@ def network_layer_informer():
 
 def network_layer_listener():
     global neighbor_list, topology_table, candidate_leader
+    global existing_nodes
     candidate_leader = name_self
 
     server_socket = context.socket(zmq.PULL)
@@ -453,7 +491,7 @@ def network_layer_listener():
         elapsed_time = time.time() - message.timestamp
         # print("\n (Application Layer) message \"%s\" received from %s within %f seconds in %d hops" %
         #       (message.message, message.name, elapsed_time, message.hop_count + 1), flush=True)
-        time_file.write("%s %d %f\r\n" % (message.name, message.hop_count + 1, elapsed_time))
+        # time_file.write("%s %d %f\r\n" % (message.name, message.hop_count + 1, elapsed_time))
         # break on some condition
 
 
