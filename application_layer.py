@@ -38,7 +38,10 @@ bully_wait_time = 3
 bully_dict = {"ack": {"sent": [], "received": []},
               "elect": {"sent": [], "received": []},
               "grant": {"sent": [], "received": []},
+              "finish": {"sent": [], "received": []},
               "victory": {"sent": [], "received": []}}
+
+bully_elector = None
 
 elect_start_time = 0
 
@@ -49,15 +52,33 @@ candidate_leader = None
 election_finished = False
 
 election_algorithm = None
-election_count = None
+election_count = 0
 is_election_starter = None
 is_election_auto = None
-existing_nodes = {}  # dictionary [nodeName] -> [finished(boolean)]
+is_first_time = True
+
+terminate = False
+
 local_election_count = 0
-loss = None
+
+loss = ""
+
+existing_nodes = {}  # dictionary [nodeName] -> [finished(boolean)]
+
+
+def writeToFile(time_elapsed):
+    time_file = open("time" + name_self + loss + ".txt", "a")
+    time_file.write("{:.4f}\n".format(time_elapsed))
+    time_file.close()
 
 
 def start_election(name):
+    global is_first_time
+    if is_first_time:
+        is_first_time = False
+        time.sleep(5)
+    global bully_elector, local_election_count
+    bully_elector = name_self
     election_queue.put("start " + name)
 
 
@@ -108,23 +129,36 @@ def bully(first_message, start):
 
 
 def bully_start():
+    global elect_start_time, bully_starter
+    elect_start_time = time.time()
+    bully_starter = True
     for node_name in topology_table:
         if node_name > name_self:
             # print("send elect message to {}".format(node_name))
             bully_send("elect", node_name)
+    # if potential leader is starting the election
+    if len(bully_dict["ack"]["received"]) == len(bully_dict["elect"]["sent"]):
+        for node_name in topology_table:
+            if node_name != name_self:
+                print("send victory message to {}".format(node_name))
+                bully_send("victory", node_name)
+        elect()
 
 
 def bully_send(message_type, destination):
-    packet_to_send = packet(["BULLY", message_type.upper()], "", "", "", {}, destination, "", "", "", time.time(),
-                            0)
+    packet_to_send = packet(["BULLY", message_type.upper()], "", "", "", {}, destination, "", "", bully_elector,
+                            elect_start_time, 0)
     bully_dict[message_type]["sent"].append(destination)
     network_layer_queue.put(pickle.dumps(packet_to_send))
 
 
 def bully_process_message(message):
+    global elect_start_time, bully_elector, local_election_count
     message_source = message.name
+    elect_start_time = message.timestamp
     if message.type[1] == "ELECT":
-        # print("got elect message from {}".format(message_source))
+        bully_elector = message.message
+        print("got elect message from {}".format(message_source))
         # if bully_dict["elect"]["received"]:
         #     if min(bully_dict["elect"]["received"]) < message_source:
         #         print("previous elect is smaller than this. Ignoring...")
@@ -132,7 +166,7 @@ def bully_process_message(message):
         bully_dict["elect"]["received"].append(message_source)
         bully_send("ack", message_source)
     elif message.type[1] == "ACK":
-        # print("got ack message from {}".format(message_source))
+        print("got ack message from {}".format(message_source))
         bully_dict["ack"]["received"].append(message_source)
         if len(bully_dict["ack"]["received"]) == len(bully_dict["elect"]["sent"]):
             winner = max(bully_dict["ack"]["received"])
@@ -147,27 +181,46 @@ def bully_process_message(message):
             pass  # TODO add a timer to check ack timeout
 
     elif message.type[1] == "GRANT":
+        elapsed_time = time.time() - elect_start_time
         print("\n\nThis node is selected LEADER\n\n")
         for node_name in topology_table:
             if node_name != name_self:
                 print("send victory message to {}".format(node_name))
                 bully_send("victory", node_name)
-        elect()
+        writeToFile(elapsed_time)
+        if not bully_elector == name_self:
+            bully_send("finish", bully_elector)
+            elect()
     elif message.type[1] == "VICTORY":
-        print("\nleader is selected in {}\n".format(time.time() - elect_start_time))
+        bully_elector = message.message
+        elapsed_time = time.time() - elect_start_time
+        print("\nleader is selected in {}\n".format(elapsed_time))
         print("\n{} is the leader\n".format(message_source))
-        elect()
+        writeToFile(elapsed_time)
+        if not bully_elector == name_self:
+            bully_send("finish", bully_elector)
+            elect()
+    elif message.type[1] == "FINISH":
+        bully_dict["finish"]["received"].append(message_source)
+        if len(bully_dict["finish"]["received"]) == len(topology_table.keys()) - 1:
+            print("election finished")
+            elect()
     else:
         print("something wrong with bully message:")
         print(message)
 
 
 def bully_reset():
-    global bully_dict
+    print("BULLY RESET")
+    global bully_dict, election_queue, bully_starter, elect_start_time, bully_elector
     bully_dict = {"ack": {"sent": [], "received": []},
                   "elect": {"sent": [], "received": []},
                   "grant": {"sent": [], "received": []},
+                  "finish": {"sent": [], "received": []},
                   "victory": {"sent": [], "received": []}}
+    election_queue = queue.Queue()
+    elect_start_time = None
+    bully_elector = None
 
 
 def aefa_reset():
@@ -178,7 +231,7 @@ def aefa_reset():
     parent_node = None
     candidate_leader = name_self
     election_requester = None
-    election_queue = queue.Queue()
+    # election_queue = queue.Queue()
 
 
 def all_nodes_finished():
@@ -504,6 +557,8 @@ def read_config_file(filename, name):
     application_layer_address = node_settings["application_layer_address"]
     network_layer_up_stream_address = node_settings["network_layer_up_stream_address"]
 
+    time_file = open("time" + name + loss + ".txt", "a")
+
 
 def network_layer_informer():
     client_socket = context.socket(zmq.PUSH)
@@ -537,7 +592,6 @@ def network_layer_listener():
                 topology_table = message.link_state[name_self]
             else:
                 election_queue.put(message)
-        elapsed_time = time.time() - message.timestamp
         # print("\n (Application Layer) message \"%s\" received from %s within %f seconds in %d hops" %
         #       (message.message, message.name, elapsed_time, message.hop_count + 1), flush=True)
         # time_file.write("%s %d %f\r\n" % (message.name, message.hop_count + 1, elapsed_time))

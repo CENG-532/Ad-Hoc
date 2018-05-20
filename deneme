@@ -1,0 +1,15 @@
+h2 nohup python3 link_layer.py nodeB &
+h2 nohup python3 network_layer.py nodeB &
+h2 nohup python3 application_layer.py nodeB &
+h3 nohup python3 link_layer.py nodeC &
+h3 nohup python3 network_layer.py nodeC &
+h3 nohup python3 application_layer.py nodeC &
+h4 nohup python3 link_layer.py nodeD &
+h4 nohup python3 network_layer.py nodeD &
+h4 nohup python3 application_layer.py nodeD &
+h5 nohup python3 link_layer.py nodeE &
+h5 nohup python3 network_layer.py nodeE &
+h5 nohup python3 application_layer.py nodeE &
+h1 nohup python3 link_layer.py nodeA &
+h1 nohup python3 network_layer.py nodeA &
+h1 nohup python3 application_layer.py nodeA &
