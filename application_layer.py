@@ -47,6 +47,11 @@ candidate_leader = None
 
 election_finished = False
 
+election_algorithm = None
+election_count = None
+is_election_starter = None
+is_election_auto = None
+
 
 def start_election(name):
     election_queue.put("start " + name)
@@ -163,12 +168,8 @@ def aefa(first_message, start):
     global parent_node, election_requester, elect_start_time
 
     if start:
-        for neighbor in neighbor_list:
-            message = aefa_generate_message("ELECTION", neighbor, name_self)
-            neighbor_list_acknowledges[neighbor] = False
-            network_layer_queue.put(pickle.dumps(message))
-            parent_node = name_self
-            election_requester = name_self
+        aefa_start()
+
     else:
         aefa_process_message(first_message)
 
@@ -178,11 +179,53 @@ def aefa(first_message, start):
         if election_finished:
             print("election finished", flush=True)
             print("TIME: ", time.time() - elect_start_time)
-            elect()
+            break
+    elect()
+
+
+def aefa_start():
+    global parent_node, election_requester
+
+    parent_node = name_self
+    election_requester = name_self
+
+    for neighbor in neighbor_list:
+        message_time = aefa_generate_message("TIME", neighbor, name_self)
+        network_layer_queue.put(pickle.dumps(message_time))
+
+        message_elect = aefa_generate_message("ELECTION", neighbor, name_self)
+        neighbor_list_acknowledges[neighbor] = False
+        network_layer_queue.put(pickle.dumps(message_elect))
+
+
+def aefa_stop(message_headers, message):
+    global election_requester, parent_node, neighbor_list_acknowledges
+
+    if election_requester < message_headers[0]:
+        # todo: need to inform that election requester in the message should stop its election
+        # message format: type=[STOP] message="[WRONG_REQUESTER] [CORRECT_REQUESTER]"
+        message_to_send = aefa_generate_message("STOP", message.name,
+                                                message_headers[0] + " " + election_requester)
+        network_layer_queue.put(pickle.dumps(message_to_send))
+    elif election_requester > message_headers[0]:
+        print("ANOTHER ELECTION [{}] is going on. STOPPING CURRENT [{}]!".format(message_headers[0],
+                                                                                 election_requester))
+        # the identifier of other election requester is better, this node needs to stop its own election
+        previous_election_requester = election_requester
+        election_requester = message_headers[0]
+        for neighbor in neighbor_list:
+            message_to_send = aefa_generate_message("STOP", neighbor,
+                                                    previous_election_requester + " " + election_requester)
+            network_layer_queue.put(pickle.dumps(message_to_send))
+
+        parent_node = message.name
+
+        neighbor_list_acknowledges = {}
 
 
 def aefa_process_message(message):
     global parent_node, candidate_leader, election_finished, election_requester, neighbor_list_acknowledges
+    global elect_start_time
     # if received an election packet, send it to the neighbors but not to the parent
     # until all the neighbors returned ACK message back, wait.
     # if there is no neighbor to send the packet except the parent, then return ACK message
@@ -197,29 +240,13 @@ def aefa_process_message(message):
         if not election_requester:
             election_requester = message_headers[0]
         else:
-            if election_requester < message_headers[0]:
-                # todo: need to inform that election requester in the message should stop its election
-                # message format: type=[STOP] message="[WRONG_REQUESTER] [CORRECT_REQUESTER]"
-                message_to_send = aefa_generate_message("STOP", message.name,
-                                                        message_headers[0] + " " + election_requester)
-                network_layer_queue.put(pickle.dumps(message_to_send))
-            elif election_requester > message_headers[0]:
-                print("ANOTHER ELECTION [{}] is going on. STOPPING CURRENT [{}]!".format(message_headers[0],
-                                                                                         election_requester))
-                # the identifier of other election requester is better, this node needs to stop its own election
-                previous_election_requester = election_requester
-                election_requester = message_headers[0]
-                for neighbor in neighbor_list:
-                    message_to_send = aefa_generate_message("STOP", neighbor,
-                                                            previous_election_requester + " " + election_requester)
-                    network_layer_queue.put(pickle.dumps(message_to_send))
-
-                parent_node = message.name
-
-                neighbor_list_acknowledges = {}
+            aefa_stop(message_headers, message)
 
         if not parent_node:
             parent_node = message.name
+
+        elif parent_node != message.name:
+            aefa_stop(message_headers, message)
 
         aefa_election_inform_neighbors()
         # check for the neighbors.
@@ -272,7 +299,7 @@ def aefa_process_message(message):
             # we are already in the same election, ignore the message.
             pass
         elif election_requester > election_requester_data:
-            print("ANOTHER ELECTION [{}] is going on. STOPPING CURRENT [{}]!".format(message_headers[0],
+            print("ANOTHER ELECTION [{}] is going on. STOPPING CURRENT [{}]!".format(message_headers[1],
                                                                                      election_requester))
             # we need to spread STOP message to our neighbors but the sender.
             previous_election_requester = election_requester
@@ -292,6 +319,18 @@ def aefa_process_message(message):
         else:
             # the stop requester should stop.
             pass
+    elif message_type == "TIME":
+        if not election_requester:
+            election_requester = message_headers[0]
+            parent_node = message.name
+            elect_start_time = message.timestamp
+        else:
+            aefa_stop(message_headers, message)
+
+        for neighbor in neighbor_list:
+            if parent_node != neighbor:
+                message_to_send = aefa_generate_message("TIME", neighbor, election_requester)
+                network_layer_queue.put(pickle.dumps(message_to_send))
 
 
 def aefa_election_inform_neighbors():
@@ -315,7 +354,7 @@ def aefa_election_inform_neighbors():
 
 
 def aefa_generate_message(message_type, destination, message_info=""):
-    message = packet(["AEFA", message_type], "", "", "", {}, destination, "", "", message_info, time.time(), 0)
+    message = packet(["AEFA", message_type], "", "", "", {}, destination, "", "", message_info, elect_start_time, 0)
     return message
 
 
@@ -359,10 +398,21 @@ def signal_handler(signal, frame):
 
 def read_config_file(filename, name):
     global application_layer_address, network_layer_up_stream_address, name_self, time_file
+    global election_algorithm, election_count, is_election_starter, is_election_auto
     config = configparser.ConfigParser()
     config.read(filename)
+
     name_self = name
     time_file = open("time" + name + ".txt", "w+")
+
+    default_settings = config["DEFAULT"]
+
+    election_algorithm = default_settings["election_algorithm"]
+    election_count = int(default_settings["election_count"])
+    is_election_starter = default_settings["election_starter"] == name
+    is_election_auto = default_settings["election_test_type"] == "auto"
+
+    print(election_count, election_algorithm, is_election_starter, is_election_auto)
 
     node_settings = config[name]
     application_layer_address = node_settings["application_layer_address"]
@@ -419,11 +469,13 @@ if __name__ == "__main__":
     network_layer_listener_thread = threading.Thread(target=network_layer_listener, args=())
 
     election_thread.start()
-    prompt_thread.start()
+    if not is_election_auto:
+        prompt_thread.start()
     network_layer_informer_thread.start()
     network_layer_listener_thread.start()
 
     election_thread.join()
-    prompt_thread.join()
+    if not is_election_auto:
+        prompt_thread.join()
     network_layer_informer_thread.join()
     network_layer_listener_thread.join()
