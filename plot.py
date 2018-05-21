@@ -34,25 +34,25 @@ def plot(rdt, sctp, exp_num, title, xlabel, fig_name, xtick_label):
 
 
 def plot2(rdt, sctp, rdt_m, sctp_m, exp_num, title, xlabel, fig_name, xtick_label):
-    x_axis = np.arange(4)
+    x_axis = np.arange(3)
     width = 0.35
 
     fig, ax = plt.subplots()
     rdt_means, rdt_errs = confidence_interval_calculation(rdt, exp_num)
-    # sctp_means, sctp_errs = confidence_interval_calculation(sctp, exp_num)
+    sctp_means, sctp_errs = confidence_interval_calculation(sctp, exp_num)
     # rdt_means_m, rdt_errs_m = confidence_interval_calculation(rdt_m, exp_num)
     # sctp_means_m, sctp_errs_m = confidence_interval_calculation(sctp_m, exp_num)
     plt.errorbar(x_axis, rdt_means, color='r', yerr=rdt_errs)
-    # plt.errorbar(x_axis, sctp_means, color='y', yerr=sctp_errs, label="SCTP(no multi-homing)")
+    plt.errorbar(x_axis, sctp_means, color='y', yerr=sctp_errs, label="SCTP(no multi-homing)")
     # plt.errorbar(x_axis, rdt_means_m, color='b', yerr=rdt_errs_m, label="RDT(multi-homed)")
     # plt.errorbar(x_axis, sctp_means_m, color='g', yerr=sctp_errs_m, label="SCTP(multi-homed)")
 
     # print(np.sum(rdt,axis=1)/exp_num)
-    print(rdt_means)
+    # print(rdt_means)
 
     plt.title(title)
 
-    plt.ylabel('file transfer time(sec)')
+    plt.ylabel('election time(sec)')
     plt.xlabel(xlabel)
     ax.set_xticks(x_axis)
     ax.set_xticklabels(xtick_label)
@@ -84,6 +84,27 @@ def plot_hop(rdt, exp_num, title, xlabel, fig_name, xtick_label):
     fig.savefig(fig_name, dpi=fig.dpi)
 
 
+def readFromFile(dir):
+    data_dict = {}
+    node_name = 'A'
+    loss_array = ['5', '10', '15']
+    node_number = 5
+    for i in range(0, node_number):
+        # for a node
+        for loss in loss_array:
+            f = open(dir + "/timenode" + node_name + str(loss) + ".txt", "r")
+            l = f.read().splitlines()
+            temp = []
+            for line in l:
+                temp.append(float(line))
+            data_dict[node_name + str(loss)] = temp
+        node_name = chr(ord(node_name) + 1)
+    # for i in data_dict.keys():
+    #     print(i, data_dict[i], len(data_dict[i]))
+
+    return data_dict
+
+
 # hop 2 node A 400 delay
 hop_1_node_A = [0.001165, 0.001048, 0.00155, 0.00191, 0.002124, 0.001843, 0.001584, 0.002205, 0.001374, 0.002055,
                 0.001766, 0.002079, 0.001137, 0.001841, 0.001566, 0.00214, 0.001413, 0.003348, 0.001608, 0.000986]
@@ -98,10 +119,6 @@ hop_4_node_A = [0.01084, 0.003801, 0.004921, 0.003788, 0.005821, 0.003765, 0.004
                 0.005025, 0.005387, 0.00577, 0.003763, 0.004606, 0.004029, 0.004847, 0.004259, 0.006395, 0.004813]
 
 node_A = [hop_1_node_A, hop_2_node_A, hop_3_node_A, hop_4_node_A]
-
-
-
-
 
 # data
 exp_num = 20
@@ -137,14 +154,28 @@ sctp_rp = [[0.852, 0.859, 0.856, 0.857, 0.996, 0.994, 1.003, 0.994, 0.993, 0.855
 
 # plot2(rdt_lp_1, sctp_lp_1, rdt_lp_2, sctp_lp_2, exp_num, 'Packet Loss Percentage vs File Transfer Time',
 #       'packet loss percentage', "exp_lp.png", ('0.1%', '5%', '10%'))
-# plot(rdt_lp_2, sctp_lp_2, exp_num, 'Experiment 2 Packet Loss Percentage vs File Transfer Time',
-#      'packet loss percentage', "exp2_lp.png", ('0.1%', '5%', '10%'))
+plot(rdt_lp_2, sctp_lp_2, exp_num, 'Experiment 2 Packet Loss Percentage vs File Transfer Time',
+     'packet loss percentage', "exp2_lp.png", ('0.1%', '5%', '10%'))
 # plot(rdt_cp, sctp_cp, exp_num, 'Corruption Percentage vs File Transfer Time', 'corruption percentage', "exp_cp.png",
 #      ('0.1%', '5%', '20%'))
 # plot(rdt_rp, sctp_rp, exp_num, 'Reordering Percentage vs File Transfer Time', 'reordering percentage', "exp_rp.png",
 #      ('5%', '20%', '35%'))
 
 # plot_hop(node_A, exp_num, "text1", "text2", "hop.png", ('0.1%', '5%', '10%'))
+if __name__ == '__main__':
+    # plot2(node_A, [], [], [], exp_num, 'Hop Count vs Data Transfer Time',
+    #       'hop count', "hop.png", ('1', '2', '3', '4'))
 
-plot2(node_A, [], [], [], exp_num, 'Hop Count vs Data Transfer Time',
-      'hop count', "hop.png", ('1', '2', '3', '4'))
+    aefa_dict = readFromFile("aefa")
+    bully_dict = readFromFile("bully")
+    loss_array = [[bully_dict["A5"], bully_dict["A10"], bully_dict["A15"]],
+                  [aefa_dict["A5"], aefa_dict["A10"], aefa_dict["A15"]]]
+    print(loss_array[1])
+    # plot2(loss_array[0], [], [], [], exp_num, 'Loss Percentage vs Election Time',
+    #       'packet loss percentage', "bully_loss.png", ('5', '10', '15'))
+    #
+    # plot2(loss_array[1], [], [], [], exp_num, 'Loss Percentage vs Election Time',
+    #       'packet loss percentage', "aefa_loss", ('5', '10', '15'))
+
+    plot2(loss_array[0], loss_array[1], [], [], exp_num, 'Loss Percentage vs Election Time',
+          'packet loss percentage', "bully_loss.png", ('5', '10', '15'))
