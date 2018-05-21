@@ -429,7 +429,7 @@ def read_config_file(filename, name):
 
     number_of_scopes = len(fish_eye_scopes)
 
-    position_self = (float(node_settings["positionX"]), float(node_settings["positionX"]))
+    position_self = (float(node_settings["positionX"]), float(node_settings["positionY"]))
 
     current_time = time.time()
 

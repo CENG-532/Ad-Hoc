@@ -232,7 +232,7 @@ def read_config_file(filename, name):
 
     print(ip_address_self, flush=True)
 
-    position_self = (float(node_settings["positionX"]), float(node_settings["positionX"]))
+    position_self = (float(node_settings["positionX"]), float(node_settings["positionY"]))
     communication_range = float(config["DEFAULT"]["range"])
 
 

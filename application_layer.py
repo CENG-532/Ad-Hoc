@@ -55,7 +55,6 @@ election_algorithm = None
 election_count = 0
 is_election_starter = None
 is_election_auto = None
-is_first_time = True
 
 terminate = False
 
@@ -66,17 +65,7 @@ loss = ""
 existing_nodes = {}  # dictionary [nodeName] -> [finished(boolean)]
 
 
-def writeToFile(time_elapsed):
-    time_file = open("time" + name_self + loss + ".txt", "a")
-    time_file.write("{:.4f}\n".format(time_elapsed))
-    time_file.close()
-
-
 def start_election(name):
-    global is_first_time
-    if is_first_time:
-        is_first_time = False
-        time.sleep(5)
     global bully_elector, local_election_count
     bully_elector = name_self
     election_queue.put("start " + name)
@@ -119,13 +108,17 @@ def elect():
 
 
 def bully(first_message, start):
+    global local_election_count
     if start:
         bully_start()
     else:
         bully_process_message(first_message)
-    while True:
+    while not election_finished:
         election_message = election_queue.get()
         bully_process_message(election_message)
+    if is_election_starter and local_election_count == election_count:
+        kill_on_finish()
+    local_election_count += 1
 
 
 def bully_start():
@@ -153,7 +146,7 @@ def bully_send(message_type, destination):
 
 
 def bully_process_message(message):
-    global elect_start_time, bully_elector, local_election_count
+    global elect_start_time, bully_elector, local_election_count, election_finished
     message_source = message.name
     elect_start_time = message.timestamp
     if message.type[1] == "ELECT":
@@ -187,24 +180,24 @@ def bully_process_message(message):
             if node_name != name_self:
                 print("send victory message to {}".format(node_name))
                 bully_send("victory", node_name)
-        writeToFile(elapsed_time)
+        write_to_file(elapsed_time)
         if not bully_elector == name_self:
             bully_send("finish", bully_elector)
-            elect()
+            election_finished = True
     elif message.type[1] == "VICTORY":
         bully_elector = message.message
         elapsed_time = time.time() - elect_start_time
         print("\nleader is selected in {}\n".format(elapsed_time))
         print("\n{} is the leader\n".format(message_source))
-        writeToFile(elapsed_time)
+        write_to_file(elapsed_time)
         if not bully_elector == name_self:
             bully_send("finish", bully_elector)
-            elect()
+            election_finished = True
     elif message.type[1] == "FINISH":
         bully_dict["finish"]["received"].append(message_source)
         if len(bully_dict["finish"]["received"]) == len(topology_table.keys()) - 1:
             print("election finished")
-            elect()
+            election_finished = True
     else:
         print("something wrong with bully message:")
         print(message)
@@ -212,7 +205,7 @@ def bully_process_message(message):
 
 def bully_reset():
     print("BULLY RESET")
-    global bully_dict, election_queue, bully_starter, elect_start_time, bully_elector
+    global bully_dict, election_queue, bully_starter, elect_start_time, bully_elector, election_finished
     bully_dict = {"ack": {"sent": [], "received": []},
                   "elect": {"sent": [], "received": []},
                   "grant": {"sent": [], "received": []},
@@ -221,6 +214,7 @@ def bully_reset():
     election_queue = queue.Queue()
     elect_start_time = None
     bully_elector = None
+    election_finished = False
 
 
 def aefa_reset():
