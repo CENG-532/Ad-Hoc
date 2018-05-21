@@ -168,6 +168,7 @@ def process_packet(message):
     packet_link_state = message.link_state
 
     topology_table_mutex.acquire()
+    topology_table_changed = True
 
     if name in topology_table[name_self]["neighbor_list"]:
         topology_table[name]["sequence_number"] += 1
@@ -382,6 +383,7 @@ def link_layer_client():
         message = link_layer_message_queue.get()
 
         if not _is_control_message(message.type):
+            # print("routing table->>>>>>>", routing_table)
             message = message._replace(next_hop=find_routing(message.destination))
             # print("\n (Network Layer) message \"%s\" forwarded from %s to %s" % (message.message, message.source, message.next_hop), flush=True)
 

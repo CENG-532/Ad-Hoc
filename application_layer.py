@@ -54,33 +54,47 @@ is_election_starter = None
 is_election_auto = None
 existing_nodes = {}  # dictionary [nodeName] -> [finished(boolean)]
 local_election_count = 0
+loss = None
 
 
 def start_election(name):
     election_queue.put("start " + name)
 
 
-def elect():
-    global elect_start_time
-    bully_reset()
-    aefa_reset()
-    message = election_queue.get()
-    print("election function message: ", message)
-    try:
-        print("election type : ", message.type[0], message.type[1])
-    except Exception:
-        pass
-    elect_start_time = time.time()
-    if message == "start bully":
-        bully("", True)
-    elif message == "start aefa":
-        aefa("", True)
+def write_to_file(line):
+    global time_file, loss
+    time_file = open("time" + name_self + str(loss) + ".txt", "a")
+    time_file.write(line)
+    time_file.close()
 
-    elif message.type[0] == "BULLY":
-        bully(message, False)
-    elif message.type[0] == "AEFA":
-        print("message_Type: ", message.type)
-        aefa(message, False)
+
+def elect():
+    global elect_start_time, local_election_count, is_election_starter, is_election_auto, election_count
+    while True:
+        bully_reset()
+        aefa_reset()
+
+        if local_election_count != election_count and is_election_starter and is_election_auto:
+            print("elect started: ", election_algorithm)
+            start_election(election_algorithm)
+
+        message = election_queue.get()
+        print("election function message: ", message)
+        try:
+            print("election type : ", message.type[0], message.type[1])
+        except Exception:
+            pass
+        elect_start_time = time.time()
+        if message == "start bully":
+            bully("", True)
+        elif message == "start aefa":
+            aefa("", True)
+
+        elif message.type[0] == "BULLY":
+            bully(message, False)
+        elif message.type[0] == "AEFA":
+            print("message_Type: ", message.type)
+            aefa(message, False)
 
 
 def bully(first_message, start):
@@ -180,11 +194,16 @@ def all_nodes_finished():
 
 
 def aefa(first_message, start):
-    global parent_node, election_requester, elect_start_time, existing_nodes
+    global parent_node, election_requester, elect_start_time, existing_nodes, local_election_count, election_count
+    global neighbor_list_acknowledges
 
     elapsed_time = None
 
+    for neighbor in neighbor_list:
+        neighbor_list_acknowledges[neighbor] = False
+
     if start:
+        print("election started")
         aefa_start()
 
     else:
@@ -211,16 +230,17 @@ def aefa(first_message, start):
                 print("node: {} is finished".format(message.name))
                 existing_nodes[message.name] = True
 
-        print("restarting election over again")
-        kill_on_finish()
+        print("restarting election over again count:", local_election_count, election_count)
+        if local_election_count == election_count - 1:
+            kill_on_finish()
+        local_election_count += 1
 
     else:
         message_to_send = aefa_generate_message("FINISHED", election_requester)
         network_layer_queue.put(pickle.dumps(message_to_send))
 
-    time_file.write("{:.4f}\n".format(elapsed_time))
-    print("elapsed time: {:.4f}".format(elapsed_time))
-    elect()
+    if election_requester:
+        write_to_file("{:.4f}\n".format(elapsed_time))
 
 
 def aefa_start():
@@ -229,10 +249,14 @@ def aefa_start():
     parent_node = name_self
     election_requester = name_self
 
-    for neighbor in neighbor_list:
-        message_time = aefa_generate_message("TIME", neighbor, name_self)
+    while not neighbor_list:
+        pass
+
+    for node in topology_table:
+        message_time = aefa_generate_message("TIME", node, name_self)
         network_layer_queue.put(pickle.dumps(message_time))
 
+    for neighbor in neighbor_list:
         message_elect = aefa_generate_message("ELECTION", neighbor, name_self)
         neighbor_list_acknowledges[neighbor] = False
         network_layer_queue.put(pickle.dumps(message_elect))
@@ -279,14 +303,15 @@ def aefa_process_message(message):
     if message_type == "ELECTION":
         if not election_requester:
             election_requester = message_headers[0]
-        else:
-            aefa_stop(message_headers, message)
-
-        if not parent_node:
             parent_node = message.name
-
+            neighbor_list_acknowledges[parent_node] = True
+        # elif election_requester != message_headers[0]:
+        #     aefa_stop(message_headers, message)
         elif parent_node != message.name:
-            aefa_stop(message_headers, message)
+            message_to_send = aefa_generate_message("ACK", message.name, election_requester + " " + candidate_leader)
+            neighbor_list_acknowledges[message.name] = True
+            network_layer_queue.put(pickle.dumps(message_to_send))
+            return
 
         aefa_election_inform_neighbors()
         # check for the neighbors.
@@ -294,10 +319,6 @@ def aefa_process_message(message):
     elif message_type == "ACK":
         if message_headers[0] != election_requester:
             # here we return because, ACK messages come from the wrong selection
-            return
-
-        if neighbor_list_acknowledges[message.name]:
-            # duplicate ack messages
             return
 
         neighbor_list_acknowledges[message.name] = True
@@ -313,21 +334,22 @@ def aefa_process_message(message):
                 network_layer_queue.put(pickle.dumps(message_to_send))
             else:
                 print("Leader is selected: ", candidate_leader)
-                for node in neighbor_list:
+                for node in topology_table:
                     if node != name_self:
                         message_to_send = aefa_generate_message("LEADER", node,
                                                                 election_requester + " " + candidate_leader)
                         network_layer_queue.put(pickle.dumps(message_to_send))
                 election_finished = True
+
     elif message_type == "LEADER":
         # leader message is received. now you can measure the time.
         # flood leader packets just like ack packages.
 
         candidate_leader = message_headers[1]
-        for node in neighbor_list:
-            if node != parent_node:
-                message_to_send = aefa_generate_message("LEADER", node, election_requester + " " + candidate_leader)
-                network_layer_queue.put(pickle.dumps(message_to_send))
+        # for node in neighbor_list:
+        #     if node != parent_node:
+        #         message_to_send = aefa_generate_message("LEADER", node, election_requester + " " + candidate_leader)
+        #         network_layer_queue.put(pickle.dumps(message_to_send))
 
         print("########LEADER######## is : {}".format(candidate_leader), flush=True)
         election_finished = True
@@ -359,18 +381,22 @@ def aefa_process_message(message):
         else:
             # the stop requester should stop.
             pass
-    elif message_type == "TIME":
-        if not election_requester:
-            election_requester = message_headers[0]
-            parent_node = message.name
-            elect_start_time = message.timestamp
-        else:
-            aefa_stop(message_headers, message)
 
-        for neighbor in neighbor_list:
-            if parent_node != neighbor:
-                message_to_send = aefa_generate_message("TIME", neighbor, election_requester)
-                network_layer_queue.put(pickle.dumps(message_to_send))
+    elif message_type == "TIME":
+        elect_start_time = message.timestamp
+        # if not election_requester:
+        #     election_requester = message_headers[0]
+        #     parent_node = message.name
+        #     elect_start_time = message.timestamp
+        # elif election_requester == message_headers[0]:
+        #     return
+        # else:
+        #     aefa_stop(message_headers, message)
+        #
+        # for neighbor in neighbor_list:
+        #     if parent_node != neighbor:
+        #         message_to_send = aefa_generate_message("TIME", neighbor, election_requester)
+        #         network_layer_queue.put(pickle.dumps(message_to_send))
 
 
 def aefa_election_inform_neighbors():
@@ -380,7 +406,6 @@ def aefa_election_inform_neighbors():
         if neighbor != parent_node:
             message_sent = True
             message_to_send = aefa_generate_message("ELECTION", neighbor, election_requester)
-            neighbor_list_acknowledges[neighbor] = False
             network_layer_queue.put(pickle.dumps(message_to_send))
     if message_sent:
         return
@@ -459,12 +484,11 @@ def signal_handler(signal, frame):
 
 def read_config_file(filename, name):
     global application_layer_address, network_layer_up_stream_address, name_self, time_file
-    global election_algorithm, election_count, is_election_starter, is_election_auto
+    global election_algorithm, election_count, is_election_starter, is_election_auto, loss
     config = configparser.ConfigParser()
     config.read(filename)
 
     name_self = name
-    time_file = open("time" + name + ".txt", "w+")
 
     default_settings = config["DEFAULT"]
 
@@ -472,6 +496,7 @@ def read_config_file(filename, name):
     election_count = int(default_settings["election_count"])
     is_election_starter = default_settings["election_starter"] == name
     is_election_auto = default_settings["election_test_type"] == "auto"
+    loss = int(default_settings["loss"])
 
     print(election_count, election_algorithm, is_election_starter, is_election_auto)
 
@@ -530,11 +555,17 @@ if __name__ == "__main__":
     network_layer_informer_thread = threading.Thread(target=network_layer_informer, args=())
     network_layer_listener_thread = threading.Thread(target=network_layer_listener, args=())
 
-    election_thread.start()
-    if not is_election_auto:
-        prompt_thread.start()
     network_layer_informer_thread.start()
     network_layer_listener_thread.start()
+
+    if is_election_starter and is_election_auto:
+        print("sleeping for 20 secs")
+        time.sleep(20)
+
+    election_thread.start()
+
+    if not is_election_auto:
+        prompt_thread.start()
 
     election_thread.join()
     if not is_election_auto:
